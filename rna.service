@@ -1,0 +1,34 @@
+[Unit]
+Description=RNA Sequence Streaming Service
+Documentation=https://github.com/mlbright/thejoined
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Binary location – adjust if installed elsewhere.
+ExecStart=/usr/local/bin/rna
+
+# Restart automatically on failure.
+Restart=on-failure
+RestartSec=5s
+
+# --- Required configuration ---
+# Set RNA_MODE to "client" or "server".
+# In client mode RNA_HOST must point to the server.
+Environment=RNA_MODE=server
+#Environment=RNA_HOST=192.0.2.1
+
+# --- Optional tuning (defaults shown) ---
+Environment=RNA_PORT=8080
+Environment=RNA_DURATION=78
+Environment=RNA_STREAMS=1
+Environment=RNA_SEQ_MODE=repeated
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
