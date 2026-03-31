@@ -115,7 +115,7 @@ func TestHandleRNA_ValidRepeatedStream(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
 	}
-	var resp map[string]interface{}
+	var resp map[string]any
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("response JSON: %v", err)
 	}
@@ -219,13 +219,13 @@ func TestClientServer_MultipleStreams(t *testing.T) {
 	streams := 3
 	errs := make(chan error, streams)
 	for id := 1; id <= streams; id++ {
-		go func(id int) {
+		go func() {
 			errs <- sendStream(host, port, 2, id, "repeated")
-		}(id)
+		}()
 	}
 
 	deadline := time.After(25 * time.Second)
-	for i := 0; i < streams; i++ {
+	for range streams {
 		select {
 		case err := <-errs:
 			if err != nil {

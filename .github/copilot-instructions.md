@@ -2,7 +2,27 @@
 
 ## Project Summary
 
-`thejoined` is a Go project that generates the Pluribus sequence. It is a small, focused library/command-line tool with no external dependencies beyond the Go standard library.
+`thejoined` is a web server that assists with network traffic diagnostics and debugging.
+
+HTTP or HTTPS requests sent to the server will be logged and the request details will be returned in the response body, along with a variable number of 'G','U','A', and 'C' characters to round out the desired payload size.
+
+The payload size can be configured by the client via a HEADER, allowing users to test how their applications handle different response sizes.
+Sizes can be specified in bytes, kilobytes, megabytes, or gigabytes, using the standard suffixes (B, KB, MB, GB). For example, a client could request a 1MB response by including the header `X-Payload-Size: 1MB`.
+
+By default, the server will return a payload of 10MB if no size is specified.
+
+By default, the IP address and port of the requester will be specified at the beginning of the response body, followed by the request method, URL, and headers.
+This will be refered to as the "request information section" of the payload.
+To round out the size request, an assortment of 'G','U','A', and 'C' characters will be appended to the end of the request information section until the total payload size is met.
+The minimum size of the request is the "request information section".
+
+The server will also log this information to the console for easy access.
+
+This allows users to easily inspect the contents of their requests and responses, making it a useful tool for debugging and troubleshooting network issues.
+
+It is a Go project that is a small, focused server with no external dependencies beyond the Go standard library.
+
+By default, it is published as a docker image on Docker Hub, but a systemd unit file and manual build instructions will be provided for users who prefer to run it directly on their machines.
 
 ## Language and Runtime
 

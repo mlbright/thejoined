@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"math/rand"
@@ -87,12 +88,12 @@ func runClient(host, port string, duration, streams int, seqMode string) {
 		var wg sync.WaitGroup
 		for id := 1; id <= streams; id++ {
 			wg.Add(1)
-			go func(streamID int) {
+			go func() {
 				defer wg.Done()
-				if err := sendStream(host, port, duration, streamID, seqMode); err != nil {
-					log.Printf("stream %d error: %v", streamID, err)
+				if err := sendStream(host, port, duration, id, seqMode); err != nil {
+					log.Printf("stream %d error: %v", id, err)
 				}
-			}(id)
+			}()
 		}
 		wg.Wait()
 		log.Printf("transmission complete, repeating…")
@@ -198,10 +199,12 @@ func handleRNA(w http.ResponseWriter, r *http.Request) {
 	patternErrors := 0
 	pat := []byte(meta.Pattern)
 	buf := make([]byte, chunkSize)
+	checksum := crc32.NewIEEE()
 
 	for {
 		n, err := r.Body.Read(buf)
 		if n > 0 {
+			checksum.Write(buf[:n])
 			for i, b := range buf[:n] {
 				if !isValidRNA(b) {
 					invalidChars++
@@ -227,6 +230,7 @@ func handleRNA(w http.ResponseWriter, r *http.Request) {
 	}
 
 	elapsed := time.Since(start)
+	w.Header().Set("X-Payload-Checksum", fmt.Sprintf("%08x", checksum.Sum32()))
 
 	if invalidChars > 0 || patternErrors > 0 {
 		log.Printf("[stream %d] FAIL: invalidChars=%d patternErrors=%d totalBytes=%d elapsed=%.1fs mode=%s",
