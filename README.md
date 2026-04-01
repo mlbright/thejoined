@@ -24,7 +24,7 @@ docker run -p 8080:8080 mlbright/thejoined
 
 ### Build from source
 
-Requires Go 1.24 or later.
+Requires Go 1.26 or later.
 
 ```sh
 git clone https://github.com/mlbright/thejoined.git

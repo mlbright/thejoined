@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Stage 1: build the binary
-FROM golang:1.24-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /build
 COPY go.mod ./
 RUN go mod download
