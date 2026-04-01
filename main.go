@@ -1,292 +1,141 @@
-// Package main provides the RNA sequence streaming service.
+// Package main provides an HTTP server for network diagnostics.
 //
-// Client mode: generates an RNA sequence (G, U, A, C) and streams it to a
-// remote HTTP server for a configurable duration (default 78 s). After each
-// transmission the cycle repeats. Multiple concurrent streams are supported.
+// Any request to the server is logged and echoed back in the response body,
+// followed by enough G, U, A, C characters to reach the requested payload size.
+// The payload size is controlled by the X-Payload-Size request header using
+// standard suffixes (B, KB, MB, GB). The default is 10 MB.
 //
-// Server mode: accepts the stream, validates that every byte is a legal RNA
-// nucleotide (G, U, A, C), and – for "repeated" streams – verifies that the
-// sequence matches the declared repeating pattern.
+// Configuration via environment variable:
 //
-// Configuration is primarily via environment variables; CLI flags override:
-//
-//	RNA_MODE      client | server            (default: server)
-//	RNA_HOST      destination IP or DNS      (required in client mode)
-//	RNA_PORT      port                       (default: 8080)
-//	RNA_DURATION  transmission seconds       (default: 78)
-//	RNA_STREAMS   concurrent streams         (default: 1)
-//	RNA_SEQ_MODE  repeated | random          (default: repeated)
+//	RNA_PORT   listening port (default: 8080)
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"flag"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
-	"time"
+	"strings"
 )
 
 const (
-	rnaChars        = "GUAC"
-	chunkSize       = 4096
-	defaultPort     = "8080"
-	defaultDuration = 78
-	defaultStreams   = 1
-	repeatedPattern = "GUAC"
-	apiPath         = "/rna"
-	healthPath      = "/health"
+	defaultPayloadSize = 10 * 1024 * 1024 // 10 MB
+	nucleotides        = "GUAC"
+	payloadSizeHeader  = "X-Payload-Size"
+	checksumHeader     = "X-Payload-Checksum"
+	chunkSize          = 32 * 1024
 )
 
-// StreamMetadata is sent by the client in the X-RNA-Metadata request header
-// so that the server can verify the transmission.
-type StreamMetadata struct {
-	StreamID int    `json:"stream_id"`
-	Mode     string `json:"mode"`              // "repeated" or "random"
-	Duration int    `json:"duration"`          // expected duration in seconds
-	Pattern  string `json:"pattern,omitempty"` // repeating pattern (repeated mode only)
-}
-
-// generateRepeated returns size bytes that repeat the canonical GUAC pattern.
-func generateRepeated(size int) []byte {
-	pat := []byte(repeatedPattern)
-	buf := make([]byte, size)
-	for i := range buf {
-		buf[i] = pat[i%len(pat)]
+// parseSize parses a human-readable size string with an optional suffix
+// (B, KB, MB, GB). With no suffix the value is treated as bytes.
+func parseSize(s string) (int64, error) {
+	s = strings.TrimSpace(strings.ToUpper(s))
+	suffixes := []struct {
+		suffix string
+		mult   int64
+	}{
+		{"GB", 1 << 30},
+		{"MB", 1 << 20},
+		{"KB", 1 << 10},
+		{"B", 1},
 	}
-	return buf
-}
-
-// generateRandom returns size bytes chosen uniformly at random from G, U, A, C.
-func generateRandom(size int) []byte {
-	chars := []byte(rnaChars)
-	buf := make([]byte, size)
-	for i := range buf {
-		buf[i] = chars[rand.Intn(len(chars))]
-	}
-	return buf
-}
-
-// isValidRNA reports whether b is a legal RNA nucleotide character.
-func isValidRNA(b byte) bool {
-	return b == 'G' || b == 'U' || b == 'A' || b == 'C'
-}
-
-// runClient starts streams concurrent HTTP streams to host:port, each sending
-// RNA data for duration seconds. When all streams finish it repeats indefinitely.
-func runClient(host, port string, duration, streams int, seqMode string) {
-	for {
-		log.Printf("starting transmission: host=%s port=%s streams=%d duration=%ds mode=%s",
-			host, port, streams, duration, seqMode)
-		var wg sync.WaitGroup
-		for id := 1; id <= streams; id++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if err := sendStream(host, port, duration, id, seqMode); err != nil {
-					log.Printf("stream %d error: %v", id, err)
-				}
-			}()
-		}
-		wg.Wait()
-		log.Printf("transmission complete, repeating…")
-	}
-}
-
-// sendStream opens a single HTTP POST to the server and writes RNA chunks for
-// duration seconds using chunked transfer encoding.
-func sendStream(host, port string, duration, streamID int, seqMode string) error {
-	url := fmt.Sprintf("http://%s:%s%s", host, port, apiPath)
-
-	meta := StreamMetadata{
-		StreamID: streamID,
-		Mode:     seqMode,
-		Duration: duration,
-	}
-	if seqMode == "repeated" {
-		meta.Pattern = repeatedPattern
-	}
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
-	}
-
-	pr, pw := io.Pipe()
-	ctx, cancel := context.WithTimeout(context.Background(),
-		time.Duration(duration+30)*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, pr)
-	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	req.Header.Set("X-RNA-Metadata", string(metaJSON))
-	req.ContentLength = -1 // force chunked transfer encoding
-
-	// Write RNA chunks until the duration expires, then close the pipe.
-	deadline := time.Now().Add(time.Duration(duration) * time.Second)
-	go func() {
-		defer pw.Close()
-		for time.Now().Before(deadline) {
-			var chunk []byte
-			if seqMode == "random" {
-				chunk = generateRandom(chunkSize)
-			} else {
-				chunk = generateRepeated(chunkSize)
+	for _, e := range suffixes {
+		if strings.HasSuffix(s, e.suffix) {
+			n, err := strconv.ParseInt(strings.TrimSuffix(s, e.suffix), 10, 64)
+			if err != nil {
+				return 0, err
 			}
-			if _, err := pw.Write(chunk); err != nil {
-				return
-			}
+			return n * e.mult, nil
 		}
-	}()
-
-	client := &http.Client{Timeout: time.Duration(duration+30) * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("do request: %w", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	log.Printf("stream %d: %s – %s", streamID, resp.Status, body)
+	return strconv.ParseInt(s, 10, 64)
+}
+
+// buildRequestInfo returns a formatted summary of the incoming request.
+func buildRequestInfo(r *http.Request) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Remote-Address: %s\n", r.RemoteAddr)
+	fmt.Fprintf(&sb, "Method: %s\n", r.Method)
+	fmt.Fprintf(&sb, "URL: %s\n", r.URL.String())
+	for name, values := range r.Header {
+		for _, v := range values {
+			fmt.Fprintf(&sb, "%s: %s\n", name, v)
+		}
+	}
+	fmt.Fprintln(&sb)
+	return sb.String()
+}
+
+// writePadding writes size bytes of repeating GUAC to w, starting at
+// startOffset within the pattern so the stream is seamlessly continuous.
+func writePadding(w io.Writer, startOffset, size int64) error {
+	if size <= 0 {
+		return nil
+	}
+	pattern := []byte(nucleotides)
+	patLen := int64(len(pattern))
+	chunk := make([]byte, chunkSize)
+	written := int64(0)
+	for written < size {
+		toWrite := min(int64(len(chunk)), size-written)
+		for i := range toWrite {
+			chunk[i] = pattern[(startOffset+written+int64(i))%patLen]
+		}
+		if _, err := w.Write(chunk[:toWrite]); err != nil {
+			return err
+		}
+		written += toWrite
+	}
 	return nil
 }
 
-// runServer starts the HTTP validation server and blocks.
-func runServer(port string) {
-	mux := http.NewServeMux()
-	mux.HandleFunc(apiPath, handleRNA)
-	mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "OK")
-	})
-	log.Printf("server listening on :%s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatalf("server error: %v", err)
-	}
+// computeChecksum returns the CRC32/IEEE checksum of the full response
+// payload (info section + GUAC padding) without buffering it.
+func computeChecksum(info []byte, paddingSize int64) uint32 {
+	h := crc32.NewIEEE()
+	h.Write(info)
+	writePadding(h, int64(len(info)), paddingSize) //nolint: errcheck — hash.Hash.Write never errors
+	return h.Sum32()
 }
 
-// handleRNA is the HTTP handler for incoming RNA streams. It reads the full
-// body and validates every byte. For "repeated" streams it also checks that
-// each byte matches the declared pattern at the correct position.
-func handleRNA(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	metaHeader := r.Header.Get("X-RNA-Metadata")
-	if metaHeader == "" {
-		http.Error(w, "missing X-RNA-Metadata header", http.StatusBadRequest)
-		return
-	}
-	var meta StreamMetadata
-	if err := json.Unmarshal([]byte(metaHeader), &meta); err != nil {
-		http.Error(w, fmt.Sprintf("invalid metadata: %v", err), http.StatusBadRequest)
-		return
-	}
-
-	start := time.Now()
-	var totalBytes int64
-	invalidChars := 0
-	patternErrors := 0
-	pat := []byte(meta.Pattern)
-	buf := make([]byte, chunkSize)
-	checksum := crc32.NewIEEE()
-
-	for {
-		n, err := r.Body.Read(buf)
-		if n > 0 {
-			checksum.Write(buf[:n])
-			for i, b := range buf[:n] {
-				if !isValidRNA(b) {
-					invalidChars++
-				}
-				// For repeated mode verify each byte against the pattern position.
-				if len(pat) > 0 {
-					pos := (totalBytes + int64(i)) % int64(len(pat))
-					if b != pat[pos] {
-						patternErrors++
-					}
-				}
-			}
-			totalBytes += int64(n)
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			log.Printf("[stream %d] read error: %v", meta.StreamID, err)
-			http.Error(w, "read error", http.StatusInternalServerError)
-			return
+// handler serves every request with the request info section followed by
+// GUAC padding to fill the desired payload size.
+func handler(w http.ResponseWriter, r *http.Request) {
+	targetSize := int64(defaultPayloadSize)
+	if s := r.Header.Get(payloadSizeHeader); s != "" {
+		if n, err := parseSize(s); err == nil && n > 0 {
+			targetSize = n
 		}
 	}
 
-	elapsed := time.Since(start)
-	w.Header().Set("X-Payload-Checksum", fmt.Sprintf("%08x", checksum.Sum32()))
+	info := []byte(buildRequestInfo(r))
+	paddingSize := max(targetSize-int64(len(info)), 0)
+	actualSize := int64(len(info)) + paddingSize
 
-	if invalidChars > 0 || patternErrors > 0 {
-		log.Printf("[stream %d] FAIL: invalidChars=%d patternErrors=%d totalBytes=%d elapsed=%.1fs mode=%s",
-			meta.StreamID, invalidChars, patternErrors, totalBytes, elapsed.Seconds(), meta.Mode)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		fmt.Fprintf(w, `{"status":"error","stream_id":%d,"invalid_chars":%d,"pattern_errors":%d}`,
-			meta.StreamID, invalidChars, patternErrors)
-		return
-	}
+	log.Printf("%s %s %s payload=%d", r.RemoteAddr, r.Method, r.URL, actualSize)
 
-	log.Printf("[stream %d] OK: totalBytes=%d elapsed=%.1fs mode=%s",
-		meta.StreamID, totalBytes, elapsed.Seconds(), meta.Mode)
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"status":"ok","stream_id":%d,"bytes_received":%d,"elapsed_seconds":%.1f}`,
-		meta.StreamID, totalBytes, elapsed.Seconds())
-}
+	w.Header().Set(checksumHeader, fmt.Sprintf("%08x", computeChecksum(info, paddingSize)))
+	w.Header().Set("Content-Length", strconv.FormatInt(actualSize, 10))
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-// envOrDefault returns the value of the environment variable key, or def if
-// the variable is unset or empty.
-func envOrDefault(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
-// envInt returns the integer value of the environment variable key, or def on
-// any error.
-func envInt(key string, def int) int {
-	if v := os.Getenv(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
+	w.Write(info)
+	writePadding(w, int64(len(info)), paddingSize) //nolint: errcheck — client disconnect is non-fatal
 }
 
 func main() {
-	mode := flag.String("mode", envOrDefault("RNA_MODE", "server"), "Mode: client or server")
-	host := flag.String("host", envOrDefault("RNA_HOST", ""), "Destination host (client mode)")
-	port := flag.String("port", envOrDefault("RNA_PORT", defaultPort), "Port")
-	duration := flag.Int("duration", envInt("RNA_DURATION", defaultDuration), "Transmission duration in seconds")
-	streams := flag.Int("streams", envInt("RNA_STREAMS", defaultStreams), "Number of concurrent streams")
-	seqMode := flag.String("seq-mode", envOrDefault("RNA_SEQ_MODE", "repeated"), "Sequence mode: repeated or random")
-	flag.Parse()
+	port := os.Getenv("RNA_PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	switch *mode {
-	case "client":
-		if *host == "" {
-			log.Fatal("client mode requires a destination host: set RNA_HOST or use -host")
-		}
-		runClient(*host, *port, *duration, *streams, *seqMode)
-	case "server":
-		runServer(*port)
-	default:
-		log.Fatalf("unknown mode %q: use 'client' or 'server'", *mode)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handler)
+
+	log.Printf("listening on :%s", port)
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
+		log.Fatal(err)
 	}
 }

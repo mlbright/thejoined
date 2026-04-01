@@ -1,286 +1,210 @@
 package main
 
 import (
-	"encoding/json"
+	"fmt"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
-	"time"
 )
 
-// --- Unit tests for sequence generators ---
+// --- parseSize ---
 
-func TestGenerateRepeated(t *testing.T) {
+func TestParseSize(t *testing.T) {
 	tests := []struct {
-		size int
-		want string
+		input   string
+		want    int64
+		wantErr bool
 	}{
-		{0, ""},
-		{4, "GUAC"},
-		{8, "GUACGUAC"},
-		{5, "GUACG"},
+		{"100", 100, false},
+		{"100B", 100, false},
+		{"1KB", 1024, false},
+		{"2MB", 2 * 1024 * 1024, false},
+		{"1GB", 1024 * 1024 * 1024, false},
+		{"1mb", 1024 * 1024, false}, // case-insensitive
+		{"abc", 0, true},
+		{"1TB", 0, true}, // unknown suffix treated as numeric
 	}
 	for _, tt := range tests {
-		got := string(generateRepeated(tt.size))
-		if got != tt.want {
-			t.Errorf("generateRepeated(%d) = %q, want %q", tt.size, got, tt.want)
-		}
-	}
-}
-
-func TestGenerateRandom_Length(t *testing.T) {
-	for _, n := range []int{0, 1, 100, 4096} {
-		got := generateRandom(n)
-		if len(got) != n {
-			t.Errorf("generateRandom(%d) length = %d", n, len(got))
-		}
-	}
-}
-
-func TestGenerateRandom_ValidChars(t *testing.T) {
-	buf := generateRandom(10000)
-	for i, b := range buf {
-		if !isValidRNA(b) {
-			t.Errorf("generateRandom: invalid byte %q at index %d", b, i)
-		}
-	}
-}
-
-// --- Unit tests for isValidRNA ---
-
-func TestIsValidRNA(t *testing.T) {
-	valid := []byte{'G', 'U', 'A', 'C'}
-	invalid := []byte{'T', 'X', ' ', 'g', 'u', 'a', 'c', 0, '\n'}
-	for _, b := range valid {
-		if !isValidRNA(b) {
-			t.Errorf("isValidRNA(%q) = false, want true", b)
-		}
-	}
-	for _, b := range invalid {
-		if isValidRNA(b) {
-			t.Errorf("isValidRNA(%q) = true, want false", b)
-		}
-	}
-}
-
-// --- HTTP handler tests ---
-
-func newRNARequest(t *testing.T, body string, meta StreamMetadata) *http.Request {
-	t.Helper()
-	metaJSON, err := json.Marshal(meta)
-	if err != nil {
-		t.Fatalf("marshal metadata: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodPost, apiPath, strings.NewReader(body))
-	req.Header.Set("X-RNA-Metadata", string(metaJSON))
-	return req
-}
-
-func TestHandleRNA_WrongMethod(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, apiPath, nil)
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusMethodNotAllowed {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
-	}
-}
-
-func TestHandleRNA_MissingMetadata(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, apiPath, strings.NewReader("GUAC"))
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
-}
-
-func TestHandleRNA_MalformedMetadata(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, apiPath, strings.NewReader("GUAC"))
-	req.Header.Set("X-RNA-Metadata", "not-json")
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
-}
-
-func TestHandleRNA_ValidRepeatedStream(t *testing.T) {
-	seq := string(generateRepeated(4096))
-	meta := StreamMetadata{StreamID: 1, Mode: "repeated", Duration: 1, Pattern: repeatedPattern}
-	req := newRNARequest(t, seq, meta)
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("response JSON: %v", err)
-	}
-	if resp["status"] != "ok" {
-		t.Errorf("response status = %v, want ok", resp["status"])
-	}
-}
-
-func TestHandleRNA_ValidRandomStream(t *testing.T) {
-	seq := string(generateRandom(4096))
-	meta := StreamMetadata{StreamID: 2, Mode: "random", Duration: 1}
-	req := newRNARequest(t, seq, meta)
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body: %s", rr.Code, http.StatusOK, rr.Body.String())
-	}
-}
-
-func TestHandleRNA_InvalidChars(t *testing.T) {
-	meta := StreamMetadata{StreamID: 3, Mode: "random", Duration: 1}
-	// Inject a non-RNA character.
-	req := newRNARequest(t, "GUACXGUAC", meta)
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
-	}
-}
-
-func TestHandleRNA_PatternMismatch(t *testing.T) {
-	// Send a valid RNA sequence but declare a different pattern than what was sent.
-	meta := StreamMetadata{StreamID: 4, Mode: "repeated", Duration: 1, Pattern: "GGGG"}
-	// Actual body is GUAC...; every byte except G-positions will mismatch.
-	req := newRNARequest(t, string(generateRepeated(16)), meta)
-	rr := httptest.NewRecorder()
-	handleRNA(rr, req)
-	if rr.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
-	}
-}
-
-// --- Integration test: real client → real test server ---
-
-func TestClientServer_RepeatedStream(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(handleRNA))
-	defer ts.Close()
-
-	// Extract host and port from the test server URL.
-	addr := strings.TrimPrefix(ts.URL, "http://")
-	parts := strings.SplitN(addr, ":", 2)
-	host, port := parts[0], parts[1]
-
-	done := make(chan error, 1)
-	go func() {
-		done <- sendStream(host, port, 2, 1, "repeated")
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("sendStream error: %v", err)
-		}
-	case <-time.After(20 * time.Second):
-		t.Error("integration test timed out")
-	}
-}
-
-func TestClientServer_RandomStream(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(handleRNA))
-	defer ts.Close()
-
-	addr := strings.TrimPrefix(ts.URL, "http://")
-	parts := strings.SplitN(addr, ":", 2)
-	host, port := parts[0], parts[1]
-
-	done := make(chan error, 1)
-	go func() {
-		done <- sendStream(host, port, 2, 1, "random")
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("sendStream error: %v", err)
-		}
-	case <-time.After(20 * time.Second):
-		t.Error("integration test timed out")
-	}
-}
-
-func TestClientServer_MultipleStreams(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(handleRNA))
-	defer ts.Close()
-
-	addr := strings.TrimPrefix(ts.URL, "http://")
-	parts := strings.SplitN(addr, ":", 2)
-	host, port := parts[0], parts[1]
-
-	// 3 concurrent streams, each running for 2 seconds.
-	streams := 3
-	errs := make(chan error, streams)
-	for id := 1; id <= streams; id++ {
-		go func() {
-			errs <- sendStream(host, port, 2, id, "repeated")
-		}()
-	}
-
-	deadline := time.After(25 * time.Second)
-	for range streams {
-		select {
-		case err := <-errs:
-			if err != nil {
-				t.Errorf("stream error: %v", err)
+		got, err := parseSize(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Errorf("parseSize(%q) expected error, got %d", tt.input, got)
 			}
-		case <-deadline:
-			t.Error("timed out waiting for streams")
-			return
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseSize(%q) unexpected error: %v", tt.input, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("parseSize(%q) = %d, want %d", tt.input, got, tt.want)
 		}
 	}
 }
 
-// --- Helper / env tests ---
+// --- handler helpers ---
 
-func TestEnvOrDefault(t *testing.T) {
-	t.Setenv("TEST_RNA_KEY", "hello")
-	if got := envOrDefault("TEST_RNA_KEY", "default"); got != "hello" {
-		t.Errorf("got %q, want %q", got, "hello")
-	}
-	if got := envOrDefault("TEST_RNA_UNSET_KEY", "default"); got != "default" {
-		t.Errorf("got %q, want %q", got, "default")
-	}
-}
-
-func TestEnvInt(t *testing.T) {
-	t.Setenv("TEST_RNA_INT", "42")
-	if got := envInt("TEST_RNA_INT", 0); got != 42 {
-		t.Errorf("got %d, want 42", got)
-	}
-	if got := envInt("TEST_RNA_INT_UNSET", 99); got != 99 {
-		t.Errorf("got %d, want 99", got)
-	}
-	t.Setenv("TEST_RNA_INT_BAD", "notanint")
-	if got := envInt("TEST_RNA_INT_BAD", 7); got != 7 {
-		t.Errorf("got %d, want 7", got)
-	}
-}
-
-// TestHealthEndpoint verifies the /health endpoint returns 200 OK.
-func TestHealthEndpoint(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc(apiPath, handleRNA)
-	mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "OK\n")
-	})
-	ts := httptest.NewServer(mux)
-	defer ts.Close()
-
-	resp, err := http.Get(ts.URL + healthPath)
+func get(t *testing.T, ts *httptest.Server, path string, headers map[string]string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 	if err != nil {
-		t.Fatalf("GET /health: %v", err)
+		t.Fatalf("new request: %v", err)
 	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("do request: %v", err)
+	}
+	return resp
+}
+
+func newServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// --- response structure ---
+
+func TestHandler_DefaultPayloadSize(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", nil)
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
-		t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if int64(len(body)) != defaultPayloadSize {
+		t.Errorf("body length = %d, want %d", len(body), defaultPayloadSize)
+	}
+}
+
+func TestHandler_CustomPayloadSize(t *testing.T) {
+	ts := newServer(t)
+	tests := []struct {
+		header string
+		want   int64
+	}{
+		{"512B", 512},
+		{"1KB", 1024},
+		{"2MB", 2 * 1024 * 1024},
+	}
+	for _, tt := range tests {
+		resp := get(t, ts, "/", map[string]string{payloadSizeHeader: tt.header})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if int64(len(body)) != tt.want {
+			t.Errorf("size %s: body length = %d, want %d", tt.header, len(body), tt.want)
+		}
+	}
+}
+
+func TestHandler_ResponseStartsWithRequestInfo(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/hello?foo=bar", map[string]string{payloadSizeHeader: "512B"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	s := string(body)
+
+	for _, want := range []string{"Remote-Address:", "Method: GET", "URL: /hello?foo=bar"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("body does not contain %q", want)
+		}
+	}
+}
+
+func TestHandler_PaddingIsGUAC(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "4KB"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Find the blank line separating info from padding.
+	idx := strings.Index(string(body), "\n\n")
+	if idx < 0 {
+		t.Fatal("could not find end of request info section")
+	}
+	padding := body[idx+2:]
+	pattern := []byte(nucleotides)
+	// The padding continues the GUAC pattern from wherever the info section ended.
+	// Determine the pattern offset at the start of padding.
+	offset := (idx + 2) % len(pattern)
+	for i, b := range padding {
+		want := pattern[(offset+i)%len(pattern)]
+		if b != want {
+			t.Errorf("padding[%d] = %q, want %q", i, b, want)
+			break
+		}
+	}
+}
+
+func TestHandler_ContentLength(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "1KB"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	cl, err := strconv.ParseInt(resp.Header.Get("Content-Length"), 10, 64)
+	if err != nil {
+		t.Fatalf("Content-Length: %v", err)
+	}
+	if cl != int64(len(body)) {
+		t.Errorf("Content-Length = %d, body = %d", cl, len(body))
+	}
+}
+
+func TestHandler_Checksum(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "1KB"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	got := resp.Header.Get(checksumHeader)
+	if got == "" {
+		t.Fatal("missing X-Payload-Checksum header")
+	}
+	want := fmt.Sprintf("%08x", crc32.ChecksumIEEE(body))
+	if got != want {
+		t.Errorf("checksum = %q, want %q", got, want)
+	}
+}
+
+func TestHandler_PayloadSmallerThanInfo(t *testing.T) {
+	// If the requested size is smaller than the info section, the server
+	// returns only the info section (no truncation).
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "1B"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	if !strings.Contains(string(body), "Remote-Address:") {
+		t.Error("response does not contain request info")
+	}
+}
+
+func TestHandler_AnyPath(t *testing.T) {
+	ts := newServer(t)
+	for _, path := range []string{"/", "/foo", "/a/b/c"} {
+		resp := get(t, ts, path, map[string]string{payloadSizeHeader: "256B"})
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s: status = %d", path, resp.StatusCode)
+		}
+		if !strings.Contains(string(body), "URL: "+path) {
+			t.Errorf("%s: body does not echo path", path)
+		}
 	}
 }
