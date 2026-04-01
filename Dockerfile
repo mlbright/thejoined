@@ -13,12 +13,7 @@ RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=builder /build/rna .
 
-# Default to server mode; override with RNA_MODE=client + RNA_HOST=<host>.
-ENV RNA_MODE=server
-ENV RNA_PORT=8080
-ENV RNA_DURATION=78
-ENV RNA_STREAMS=1
-ENV RNA_SEQ_MODE=repeated
+ENV RNA_PORT=80
 
-EXPOSE 8080
+EXPOSE 80
 ENTRYPOINT ["/app/rna"]
