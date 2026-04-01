@@ -1,7 +1,10 @@
 // Package main provides an HTTP server for network diagnostics.
 //
 // Any request to the server is logged and echoed back in the response body,
-// followed by enough G, U, A, C characters to reach the requested payload size.
+// followed by enough nucleotide characters to reach the requested payload size.
+// By default the four nucleotides (G, U, A, C) are shuffled randomly on each
+// request. Supply an X-Nucleotide-Order header with any permutation of "GUAC"
+// (e.g. "UCAG") to use a fixed repeating order instead.
 // The payload size is controlled by the X-Payload-Size request header using
 // standard suffixes (B, KB, MB, GB). The default is 10 MB.
 //
@@ -15,19 +18,39 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 )
 
 const (
-	defaultPayloadSize = 10 * 1024 * 1024 // 10 MB
-	nucleotides        = "GUAC"
-	payloadSizeHeader  = "X-Payload-Size"
-	checksumHeader     = "X-Payload-Checksum"
-	chunkSize          = 32 * 1024
+	defaultPayloadSize    = 10 * 1024 * 1024 // 10 MB
+	nucleotides           = "GUAC"
+	payloadSizeHeader     = "X-Payload-Size"
+	nucleotideOrderHeader = "X-Nucleotide-Order"
+	checksumHeader        = "X-Payload-Checksum"
+	chunkSize             = 32 * 1024
 )
+
+// nucleotidePattern returns the pattern to use for padding.
+// If hdr is a valid permutation of "GUAC" it is used as-is; otherwise a
+// random shuffle is returned.
+func nucleotidePattern(hdr string) []byte {
+	hdr = strings.ToUpper(strings.TrimSpace(hdr))
+	if len(hdr) == 4 {
+		sorted := strings.Split(hdr, "")
+		sort.Strings(sorted)
+		if strings.Join(sorted, "") == "ACGU" {
+			return []byte(hdr)
+		}
+	}
+	p := []byte(nucleotides)
+	rand.Shuffle(len(p), func(i, j int) { p[i], p[j] = p[j], p[i] })
+	return p
+}
 
 // parseSize parses a human-readable size string with an optional suffix
 // (B, KB, MB, GB). With no suffix the value is treated as bytes.
@@ -69,13 +92,12 @@ func buildRequestInfo(r *http.Request) string {
 	return sb.String()
 }
 
-// writePadding writes size bytes of repeating GUAC to w, starting at
+// writePadding writes size bytes of the repeating pattern to w, starting at
 // startOffset within the pattern so the stream is seamlessly continuous.
-func writePadding(w io.Writer, startOffset, size int64) error {
+func writePadding(w io.Writer, startOffset, size int64, pattern []byte) error {
 	if size <= 0 {
 		return nil
 	}
-	pattern := []byte(nucleotides)
 	patLen := int64(len(pattern))
 	chunk := make([]byte, chunkSize)
 	written := int64(0)
@@ -93,16 +115,16 @@ func writePadding(w io.Writer, startOffset, size int64) error {
 }
 
 // computeChecksum returns the CRC32/IEEE checksum of the full response
-// payload (info section + GUAC padding) without buffering it.
-func computeChecksum(info []byte, paddingSize int64) uint32 {
+// payload (info section + padding) without buffering it.
+func computeChecksum(info []byte, paddingSize int64, pattern []byte) uint32 {
 	h := crc32.NewIEEE()
 	h.Write(info)
-	writePadding(h, int64(len(info)), paddingSize) //nolint: errcheck — hash.Hash.Write never errors
+	writePadding(h, int64(len(info)), paddingSize, pattern) //nolint: errcheck — hash.Hash.Write never errors
 	return h.Sum32()
 }
 
 // handler serves every request with the request info section followed by
-// GUAC padding to fill the desired payload size.
+// nucleotide padding to fill the desired payload size.
 func handler(w http.ResponseWriter, r *http.Request) {
 	targetSize := int64(defaultPayloadSize)
 	if s := r.Header.Get(payloadSizeHeader); s != "" {
@@ -111,18 +133,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	pattern := nucleotidePattern(r.Header.Get(nucleotideOrderHeader))
+
 	info := []byte(buildRequestInfo(r))
 	paddingSize := max(targetSize-int64(len(info)), 0)
 	actualSize := int64(len(info)) + paddingSize
 
-	log.Printf("%s %s %s payload=%d", r.RemoteAddr, r.Method, r.URL, actualSize)
+	log.Printf("%s %s %s payload=%d pattern=%s", r.RemoteAddr, r.Method, r.URL, actualSize, pattern)
 
-	w.Header().Set(checksumHeader, fmt.Sprintf("%08x", computeChecksum(info, paddingSize)))
+	w.Header().Set(checksumHeader, fmt.Sprintf("%08x", computeChecksum(info, paddingSize, pattern)))
 	w.Header().Set("Content-Length", strconv.FormatInt(actualSize, 10))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	w.Write(info)
-	writePadding(w, int64(len(info)), paddingSize) //nolint: errcheck — client disconnect is non-fatal
+	writePadding(w, int64(len(info)), paddingSize, pattern) //nolint: errcheck — client disconnect is non-fatal
 }
 
 func main() {

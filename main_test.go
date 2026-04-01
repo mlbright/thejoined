@@ -125,9 +125,12 @@ func TestHandler_ResponseStartsWithRequestInfo(t *testing.T) {
 	}
 }
 
-func TestHandler_PaddingIsGUAC(t *testing.T) {
+func TestHandler_PaddingFixedOrder(t *testing.T) {
 	ts := newServer(t)
-	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "4KB"})
+	resp := get(t, ts, "/", map[string]string{
+		payloadSizeHeader:     "4KB",
+		nucleotideOrderHeader: "GUAC",
+	})
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
@@ -137,15 +140,57 @@ func TestHandler_PaddingIsGUAC(t *testing.T) {
 		t.Fatal("could not find end of request info section")
 	}
 	padding := body[idx+2:]
-	pattern := []byte(nucleotides)
-	// The padding continues the GUAC pattern from wherever the info section ended.
-	// Determine the pattern offset at the start of padding.
+	pattern := []byte("GUAC")
 	offset := (idx + 2) % len(pattern)
 	for i, b := range padding {
 		want := pattern[(offset+i)%len(pattern)]
 		if b != want {
 			t.Errorf("padding[%d] = %q, want %q", i, b, want)
 			break
+		}
+	}
+}
+
+func TestHandler_PaddingRandomOrder(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "4KB"})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	idx := strings.Index(string(body), "\n\n")
+	if idx < 0 {
+		t.Fatal("could not find end of request info section")
+	}
+	padding := body[idx+2:]
+	valid := map[byte]bool{'G': true, 'U': true, 'A': true, 'C': true}
+	for i, b := range padding {
+		if !valid[b] {
+			t.Errorf("padding[%d] = %q, not a nucleotide", i, b)
+			break
+		}
+	}
+}
+
+func TestNucleotidePattern(t *testing.T) {
+	tests := []struct {
+		hdr      string
+		wantExact string // non-empty means expect this exact pattern
+	}{
+		{"GUAC", "GUAC"},
+		{"UCAG", "UCAG"},
+		{"guac", "GUAC"}, // case-insensitive
+		{"", ""},         // random — just check length==4 and valid chars
+		{"GGGG", ""},     // invalid — random fallback
+		{"GUACX", ""},    // invalid — random fallback
+	}
+	for _, tt := range tests {
+		p := nucleotidePattern(tt.hdr)
+		if len(p) != 4 {
+			t.Errorf("nucleotidePattern(%q) len = %d, want 4", tt.hdr, len(p))
+			continue
+		}
+		if tt.wantExact != "" && string(p) != tt.wantExact {
+			t.Errorf("nucleotidePattern(%q) = %q, want %q", tt.hdr, p, tt.wantExact)
 		}
 	}
 }
