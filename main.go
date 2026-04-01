@@ -7,7 +7,7 @@
 // characters (e.g. "AB", "UCAG", "12345678") to use it as the repeating
 // sequence instead.
 // The payload size is controlled by the X-Payload-Size request header using
-// standard suffixes (B, KB, MB, GB). The default is 10 MB.
+// standard suffixes (B, KB, MB, GB). The default is 1 KB.
 //
 // Configuration via environment variable:
 //
@@ -27,7 +27,7 @@ import (
 )
 
 const (
-	defaultPayloadSize    = 10 * 1024 * 1024 // 10 MB
+	defaultPayloadSize    = 1024 // 1 KB
 	nucleotides           = "GUAC"
 	payloadSizeHeader     = "X-Payload-Size"
 	nucleotideOrderHeader = "X-Nucleotide-Order"

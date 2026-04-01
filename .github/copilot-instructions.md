@@ -8,7 +8,7 @@ HTTP requests sent to the server are logged and the request details are returned
 
 The payload size can be configured by the client via a request header, allowing users to control the size of the response. Sizes can be specified in bytes, kilobytes, megabytes, or gigabytes using the standard suffixes (B, KB, MB, GB). For example, a client could request a 1 MB response by including the header `X-Payload-Size: 1MB`.
 
-By default, the server returns a payload of **10 MB** if no size is specified.
+By default, the server returns a payload of **1 KB** if no size is specified.
 
 The response body begins with the **request information section**: the requester's remote address, method, URL, and all request headers. This is followed by `G`, `U`, `A`, `C` padding characters until the total payload size is reached. The minimum payload is always the request information section, even if a smaller size is requested.
 
@@ -59,7 +59,7 @@ The container image is published to Docker Hub and GHCR. A systemd unit file and
 
 | Header              | Default | Description |
 |---------------------|---------|-------------|
-| `X-Payload-Size`    | `10MB`  | Desired response size (e.g. `512B`, `64KB`, `5MB`, `1GB`) |
+| `X-Payload-Size`    | `1KB`   | Desired response size (e.g. `512B`, `64KB`, `5MB`, `1GB`) |
 | `X-Nucleotide-Order`| random  | Fixed GUAC pattern (e.g. `GUAC`, `UCAG`) |
 
 ### Response Headers

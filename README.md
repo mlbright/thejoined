@@ -6,13 +6,13 @@ Send any request to the server and it will respond with a summary of your reques
 
 ## How it works
 
-1. Client sends any HTTP request, optionally including `X-Payload-Size` to control response size.
+1. Client sends any HTTP request, optionally including `X-Payload-Size` to control response size (default: 1 KB).
 2. Server logs the request and responds with:
    - **Request info section** — remote address, method, URL, and all request headers
    - **GUAC padding** — repeating `G`, `U`, `A`, `C` characters appended until the total response reaches the requested size
 3. The `X-Payload-Checksum` response header carries a CRC32/IEEE checksum of the full payload.
 
-The default payload size is **10 MB**. The minimum payload is always at least the request info section, even if a smaller size is requested.
+The default payload size is **1 KB**. The minimum payload is always at least the request info section, even if a smaller size is requested.
 
 ## Install
 
