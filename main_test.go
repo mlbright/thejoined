@@ -173,24 +173,51 @@ func TestHandler_PaddingRandomOrder(t *testing.T) {
 
 func TestNucleotidePattern(t *testing.T) {
 	tests := []struct {
-		hdr      string
+		hdr       string
 		wantExact string // non-empty means expect this exact pattern
+		wantLen   int
 	}{
-		{"GUAC", "GUAC"},
-		{"UCAG", "UCAG"},
-		{"guac", "GUAC"}, // case-insensitive
-		{"", ""},         // random — just check length==4 and valid chars
-		{"GGGG", ""},     // invalid — random fallback
-		{"GUACX", ""},    // invalid — random fallback
+		{"GUAC", "GUAC", 4},
+		{"UCAG", "UCAG", 4},
+		{"AB", "AB", 2},
+		{"12345678", "12345678", 8},
+		{"123456789", "12345678", 8}, // truncated to 8
+		{"GUAC", "GUAC", 4},
+		{"", "", 4}, // random shuffle of GUAC
 	}
 	for _, tt := range tests {
 		p := nucleotidePattern(tt.hdr)
-		if len(p) != 4 {
-			t.Errorf("nucleotidePattern(%q) len = %d, want 4", tt.hdr, len(p))
+		if len(p) != tt.wantLen {
+			t.Errorf("nucleotidePattern(%q) len = %d, want %d", tt.hdr, len(p), tt.wantLen)
 			continue
 		}
 		if tt.wantExact != "" && string(p) != tt.wantExact {
 			t.Errorf("nucleotidePattern(%q) = %q, want %q", tt.hdr, p, tt.wantExact)
+		}
+	}
+}
+
+func TestHandler_PaddingCustomPattern(t *testing.T) {
+	ts := newServer(t)
+	resp := get(t, ts, "/", map[string]string{
+		payloadSizeHeader:     "4KB",
+		nucleotideOrderHeader: "AB",
+	})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	idx := strings.Index(string(body), "\n\n")
+	if idx < 0 {
+		t.Fatal("could not find end of request info section")
+	}
+	padding := body[idx+2:]
+	pattern := []byte("AB")
+	offset := (idx + 2) % len(pattern)
+	for i, b := range padding {
+		want := pattern[(offset+i)%len(pattern)]
+		if b != want {
+			t.Errorf("padding[%d] = %q, want %q", i, b, want)
+			break
 		}
 	}
 }

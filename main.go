@@ -1,10 +1,11 @@
 // Package main provides an HTTP server for network diagnostics.
 //
 // Any request to the server is logged and echoed back in the response body,
-// followed by enough nucleotide characters to reach the requested payload size.
+// followed by enough padding characters to reach the requested payload size.
 // By default the four nucleotides (G, U, A, C) are shuffled randomly on each
-// request. Supply an X-Nucleotide-Order header with any permutation of "GUAC"
-// (e.g. "UCAG") to use a fixed repeating order instead.
+// request. Supply an X-Nucleotide-Order header with any pattern of up to 8
+// characters (e.g. "AB", "UCAG", "12345678") to use it as the repeating
+// sequence instead.
 // The payload size is controlled by the X-Payload-Size request header using
 // standard suffixes (B, KB, MB, GB). The default is 10 MB.
 //
@@ -21,7 +22,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -36,16 +36,15 @@ const (
 )
 
 // nucleotidePattern returns the pattern to use for padding.
-// If hdr is a valid permutation of "GUAC" it is used as-is; otherwise a
-// random shuffle is returned.
+// If hdr is non-empty it is used as the repeating pattern, truncated to 8
+// characters. Otherwise a random shuffle of "GUAC" is returned.
 func nucleotidePattern(hdr string) []byte {
-	hdr = strings.ToUpper(strings.TrimSpace(hdr))
-	if len(hdr) == 4 {
-		sorted := strings.Split(hdr, "")
-		sort.Strings(sorted)
-		if strings.Join(sorted, "") == "ACGU" {
-			return []byte(hdr)
+	hdr = strings.TrimSpace(hdr)
+	if hdr != "" {
+		if len(hdr) > 8 {
+			hdr = hdr[:8]
 		}
+		return []byte(hdr)
 	}
 	p := []byte(nucleotides)
 	rand.Shuffle(len(p), func(i, j int) { p[i], p[j] = p[j], p[i] })
