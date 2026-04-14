@@ -25,6 +25,9 @@ func TestParseSize(t *testing.T) {
 		{"2MB", 2 * 1024 * 1024, false},
 		{"1GB", 1024 * 1024 * 1024, false},
 		{"1mb", 1024 * 1024, false}, // case-insensitive
+		{"50K", 50 * 1024, false},
+		{"2M", 2 * 1024 * 1024, false},
+		{"1G", 1024 * 1024 * 1024, false},
 		{"abc", 0, true},
 		{"1TB", 0, true}, // unknown suffix treated as numeric
 	}

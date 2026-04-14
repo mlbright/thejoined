@@ -8,7 +8,7 @@
 // characters (e.g. "AB", "UCAG", "12345678") to use it as the repeating
 // sequence instead.
 // The payload size is controlled by the X-Payload-Size request header using
-// standard suffixes (B, KB, MB, GB). The default is 1 KB.
+// standard suffixes (B, K/KB, M/MB, G/GB). The default is 1 KB.
 //
 // Configuration via environment variable:
 //
@@ -53,7 +53,7 @@ func nucleotidePattern(hdr string) []byte {
 }
 
 // parseSize parses a human-readable size string with an optional suffix
-// (B, KB, MB, GB). With no suffix the value is treated as bytes.
+// (B, K/KB, M/MB, G/GB). With no suffix the value is treated as bytes.
 func parseSize(s string) (int64, error) {
 	s = strings.TrimSpace(strings.ToUpper(s))
 	suffixes := []struct {
@@ -63,6 +63,9 @@ func parseSize(s string) (int64, error) {
 		{"GB", 1 << 30},
 		{"MB", 1 << 20},
 		{"KB", 1 << 10},
+		{"G", 1 << 30},
+		{"M", 1 << 20},
+		{"K", 1 << 10},
 		{"B", 1},
 	}
 	for _, e := range suffixes {
