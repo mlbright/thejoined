@@ -27,11 +27,11 @@ go vet ./...
 
 **Request flow:**
 1. Any path is accepted via a catch-all handler (`mux.HandleFunc("/", handler)`)
-2. `buildRequestInfo()` formats the remote address, method, URL, and headers into the response preamble
-3. `parseSize()` reads the `X-Payload-Size` request header (default 10 MB) to determine total payload size
+2. `setRequestHeaders()` copies the remote address, method, URL, and all request headers into the response as `X-Request-*` headers
+3. `parseSize()` reads the `X-Payload-Size` request header (default 1 KB) to determine total payload size
 4. `nucleotidePattern()` reads the optional `X-Nucleotide-Order` header and returns a validated/shuffled `GUAC` pattern
-5. `writePadding()` streams `G`/`U`/`A`/`C` padding in 32 KB chunks until the total size is reached — this avoids buffering large payloads in memory
-6. `computeChecksum()` calculates a CRC32/IEEE checksum of the full response and sets it in the `X-Payload-Checksum` response header before writing the body
+5. `writePadding()` streams `G`/`U`/`A`/`C` padding in 32 KB chunks until the total size is reached — this avoids buffering large payloads in memory; the body is pure padding
+6. `computeChecksum()` calculates a CRC32/IEEE checksum of the padding and sets it in the `X-Payload-Checksum` response header before writing the body
 
 The minimum payload is always the request information section, even if a smaller size is requested.
 

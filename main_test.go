@@ -111,16 +111,25 @@ func TestHandler_CustomPayloadSize(t *testing.T) {
 	}
 }
 
-func TestHandler_ResponseStartsWithRequestInfo(t *testing.T) {
+func TestHandler_RequestInfoHeaders(t *testing.T) {
 	ts := newServer(t)
 	resp := get(t, ts, "/hello?foo=bar", map[string]string{payloadSizeHeader: "512B"})
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	s := string(body)
+	io.Copy(io.Discard, resp.Body)
 
-	for _, want := range []string{"Remote-Address:", "Method: GET", "URL: /hello?foo=bar"} {
-		if !strings.Contains(s, want) {
-			t.Errorf("body does not contain %q", want)
+	checks := map[string]string{
+		"X-Request-Remote-Addr": "",          // just present
+		"X-Request-Method":      "GET",
+		"X-Request-Url":         "/hello?foo=bar",
+	}
+	for header, want := range checks {
+		got := resp.Header.Get(header)
+		if got == "" {
+			t.Errorf("missing response header %s", header)
+			continue
+		}
+		if want != "" && !strings.Contains(got, want) {
+			t.Errorf("%s = %q, want it to contain %q", header, got, want)
 		}
 	}
 }
@@ -134,16 +143,10 @@ func TestHandler_PaddingFixedOrder(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	// Find the blank line separating info from padding.
-	idx := strings.Index(string(body), "\n\n")
-	if idx < 0 {
-		t.Fatal("could not find end of request info section")
-	}
-	padding := body[idx+2:]
+	// Body is pure padding starting at offset 0.
 	pattern := []byte("GUAC")
-	offset := (idx + 2) % len(pattern)
-	for i, b := range padding {
-		want := pattern[(offset+i)%len(pattern)]
+	for i, b := range body {
+		want := pattern[i%len(pattern)]
 		if b != want {
 			t.Errorf("padding[%d] = %q, want %q", i, b, want)
 			break
@@ -157,13 +160,9 @@ func TestHandler_PaddingRandomOrder(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	idx := strings.Index(string(body), "\n\n")
-	if idx < 0 {
-		t.Fatal("could not find end of request info section")
-	}
-	padding := body[idx+2:]
+	// Body is pure nucleotide padding.
 	valid := map[byte]bool{'G': true, 'U': true, 'A': true, 'C': true}
-	for i, b := range padding {
+	for i, b := range body {
 		if !valid[b] {
 			t.Errorf("padding[%d] = %q, not a nucleotide", i, b)
 			break
@@ -206,15 +205,10 @@ func TestHandler_PaddingCustomPattern(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	idx := strings.Index(string(body), "\n\n")
-	if idx < 0 {
-		t.Fatal("could not find end of request info section")
-	}
-	padding := body[idx+2:]
+	// Body is pure padding starting at offset 0.
 	pattern := []byte("AB")
-	offset := (idx + 2) % len(pattern)
-	for i, b := range padding {
-		want := pattern[(offset+i)%len(pattern)]
+	for i, b := range body {
+		want := pattern[i%len(pattern)]
 		if b != want {
 			t.Errorf("padding[%d] = %q, want %q", i, b, want)
 			break
@@ -253,16 +247,15 @@ func TestHandler_Checksum(t *testing.T) {
 	}
 }
 
-func TestHandler_PayloadSmallerThanInfo(t *testing.T) {
-	// If the requested size is smaller than the info section, the server
-	// returns only the info section (no truncation).
+func TestHandler_SmallPayload(t *testing.T) {
+	// Small payloads should honour the exact size — body is pure padding.
 	ts := newServer(t)
 	resp := get(t, ts, "/", map[string]string{payloadSizeHeader: "1B"})
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	if !strings.Contains(string(body), "Remote-Address:") {
-		t.Error("response does not contain request info")
+	if int64(len(body)) != 1 {
+		t.Errorf("body length = %d, want 1", len(body))
 	}
 }
 
@@ -270,13 +263,13 @@ func TestHandler_AnyPath(t *testing.T) {
 	ts := newServer(t)
 	for _, path := range []string{"/", "/foo", "/a/b/c"} {
 		resp := get(t, ts, path, map[string]string{payloadSizeHeader: "256B"})
-		body, _ := io.ReadAll(resp.Body)
+		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("%s: status = %d", path, resp.StatusCode)
 		}
-		if !strings.Contains(string(body), "URL: "+path) {
-			t.Errorf("%s: body does not echo path", path)
+		if got := resp.Header.Get("X-Request-Url"); !strings.Contains(got, path) {
+			t.Errorf("%s: X-Request-Url = %q, want it to contain path", path, got)
 		}
 	}
 }

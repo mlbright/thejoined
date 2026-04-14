@@ -1,7 +1,8 @@
 // Package main provides an HTTP server for network diagnostics.
 //
-// Any request to the server is logged and echoed back in the response body,
-// followed by enough padding characters to reach the requested payload size.
+// Request metadata (remote address, method, URL, and all incoming headers) is
+// echoed back as X-Request-* response headers. The response body contains only
+// nucleotide padding characters to fill the requested payload size.
 // By default the four nucleotides (G, U, A, C) are shuffled randomly on each
 // request. Supply an X-Nucleotide-Order header with any pattern of up to 8
 // characters (e.g. "AB", "UCAG", "12345678") to use it as the repeating
@@ -76,19 +77,18 @@ func parseSize(s string) (int64, error) {
 	return strconv.ParseInt(s, 10, 64)
 }
 
-// buildRequestInfo returns a formatted summary of the incoming request.
-func buildRequestInfo(r *http.Request) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Remote-Address: %s\n", r.RemoteAddr)
-	fmt.Fprintf(&sb, "Method: %s\n", r.Method)
-	fmt.Fprintf(&sb, "URL: %s\n", r.URL.String())
+// setRequestHeaders copies incoming request metadata to the response as
+// X-Request-* headers so the body can be pure padding.
+func setRequestHeaders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Request-Remote-Addr", r.RemoteAddr)
+	w.Header().Set("X-Request-Method", r.Method)
+	w.Header().Set("X-Request-Url", r.URL.String())
 	for name, values := range r.Header {
+		key := "X-Request-" + name
 		for _, v := range values {
-			fmt.Fprintf(&sb, "%s: %s\n", name, v)
+			w.Header().Add(key, v)
 		}
 	}
-	fmt.Fprintln(&sb)
-	return sb.String()
 }
 
 // writePadding writes size bytes of the repeating pattern to w, starting at
@@ -113,12 +113,11 @@ func writePadding(w io.Writer, startOffset, size int64, pattern []byte) error {
 	return nil
 }
 
-// computeChecksum returns the CRC32/IEEE checksum of the full response
-// payload (info section + padding) without buffering it.
-func computeChecksum(info []byte, paddingSize int64, pattern []byte) uint32 {
+// computeChecksum returns the CRC32/IEEE checksum of the response padding
+// without buffering it.
+func computeChecksum(size int64, pattern []byte) uint32 {
 	h := crc32.NewIEEE()
-	h.Write(info)
-	writePadding(h, int64(len(info)), paddingSize, pattern) //nolint: errcheck — hash.Hash.Write never errors
+	writePadding(h, 0, size, pattern) //nolint: errcheck — hash.Hash.Write never errors
 	return h.Sum32()
 }
 
@@ -134,18 +133,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 	pattern := nucleotidePattern(r.Header.Get(nucleotideOrderHeader))
 
-	info := []byte(buildRequestInfo(r))
-	paddingSize := max(targetSize-int64(len(info)), 0)
-	actualSize := int64(len(info)) + paddingSize
+	log.Printf("%s %s %s payload=%d pattern=%s", r.RemoteAddr, r.Method, r.URL, targetSize, pattern)
 
-	log.Printf("%s %s %s payload=%d pattern=%s", r.RemoteAddr, r.Method, r.URL, actualSize, pattern)
-
-	w.Header().Set(checksumHeader, fmt.Sprintf("%08x", computeChecksum(info, paddingSize, pattern)))
-	w.Header().Set("Content-Length", strconv.FormatInt(actualSize, 10))
+	setRequestHeaders(w, r)
+	w.Header().Set(checksumHeader, fmt.Sprintf("%08x", computeChecksum(targetSize, pattern)))
+	w.Header().Set("Content-Length", strconv.FormatInt(targetSize, 10))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	w.Write(info)
-	writePadding(w, int64(len(info)), paddingSize, pattern) //nolint: errcheck — client disconnect is non-fatal
+	writePadding(w, 0, targetSize, pattern) //nolint: errcheck — client disconnect is non-fatal
 }
 
 func main() {
