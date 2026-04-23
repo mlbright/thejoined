@@ -1,5 +1,5 @@
-GHCR_IMAGE      := ghcr.io/mlbright/thejoined
-DOCKERHUB_IMAGE := mlbright/thejoined
+GHCR_IMAGE      := ghcr.io/cpacketnetworks/thejoined
+DOCKERHUB_IMAGE := cpacketnetworks/thejoined
 TAG             := $(shell git describe --tags --always --dirty)
 
 .PHONY: build push publish login-dockerhub
@@ -21,4 +21,4 @@ push:
 publish: build push
 
 login-dockerhub:
-	docker login -u mlbright
+	docker login -u mbrightcpacket
