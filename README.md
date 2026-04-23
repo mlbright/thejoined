@@ -19,7 +19,7 @@ The default payload size is **1 KB**. The pattern can be fixed with the `X-Nucle
 ### Docker (recommended)
 
 ```sh
-docker run -p 8080:8080 mlbright/thejoined
+docker run -p 8080:8080 cpacketnetworks/thejoined
 ```
 
 ### Build from source
@@ -27,7 +27,7 @@ docker run -p 8080:8080 mlbright/thejoined
 Requires Go 1.26 or later.
 
 ```sh
-git clone https://github.com/mlbright/thejoined.git
+git clone https://github.com/cpacketnetworks/thejoined.git
 cd thejoined
 go build -o rna .
 ./rna

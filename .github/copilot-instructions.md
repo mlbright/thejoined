@@ -94,7 +94,7 @@ The Dockerfile is a multi-stage build:
 # Build and tag (uses git describe for version tag)
 make build
 
-# Push to GHCR (ghcr.io/mlbright/thejoined) and Docker Hub (mlbright/thejoined)
+# Push to GHCR (ghcr.io/cpacketnetworks/thejoined) and Docker Hub (cpacketnetworks/thejoined)
 make push
 
 # Build + push in one step

@@ -37,7 +37,7 @@ go vet ./...
 
 ## Docker & publishing
 
-The Dockerfile is a two-stage build (`golang:1.26-alpine` → `alpine:3.21`) producing a static binary. Images are tagged with the git-describe version and pushed to both `ghcr.io/mlbright/thejoined` and `mlbright/thejoined` via the Makefile:
+The Dockerfile is a two-stage build (`golang:1.26-alpine` → `alpine:3.21`) producing a static binary. Images are tagged with the git-describe version and pushed to both `ghcr.io/cpacketnetworks/thejoined` and `cpacketnetworks/thejoined` via the Makefile:
 
 ```bash
 make build    # build and tag

@@ -1,6 +1,6 @@
 [Unit]
 Description=RNA Sequence Streaming Service
-Documentation=https://github.com/mlbright/thejoined
+Documentation=https://github.com/cpacketnetworks/thejoined
 After=network-online.target
 Wants=network-online.target
 
