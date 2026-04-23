@@ -4,17 +4,15 @@
 
 `thejoined` is a web server that assists with network traffic diagnostics and debugging.
 
-HTTP requests sent to the server are logged and the request details are returned in the response body, along with a variable number of `G`, `U`, `A`, and `C` characters to round out the desired payload size.
+HTTP requests sent to the server are logged. The server echoes the request's remote address, method, URL, and every incoming request header back to the client as `X-Request-*` response headers. The response body itself is pure padding made of `G`, `U`, `A`, `C` (or a client-supplied pattern) sized to the requested payload size.
 
-The payload size can be configured by the client via a request header, allowing users to control the size of the response. Sizes can be specified in bytes, kilobytes, megabytes, or gigabytes using the standard suffixes (B, KB, MB, GB). For example, a client could request a 1 MB response by including the header `X-Payload-Size: 1MB`.
+The payload size can be configured by the client via a request header, allowing users to control the size of the response. Sizes can be specified in bytes, kilobytes, megabytes, or gigabytes using the standard suffixes (B/K/KB/M/MB/G/GB). For example, a client could request a 1 MB response by including the header `X-Payload-Size: 1MB`.
 
-By default, the server returns a payload of **1 KB** if no size is specified.
+By default, the server returns a payload of **1 KB** if no size is specified. The body is exactly the requested size — there is no minimum imposed by request metadata, since metadata travels in headers, not the body.
 
-The response body begins with the **request information section**: the requester's remote address, method, URL, and all request headers. This is followed by `G`, `U`, `A`, `C` padding characters until the total payload size is reached. The minimum payload is always the request information section, even if a smaller size is requested.
+The padding pattern can be fixed by the client via the `X-Nucleotide-Order` request header. Any string is accepted (truncated to 8 characters), e.g. `X-Nucleotide-Order: UCAG`. If omitted, `GUAC` is shuffled randomly per request.
 
-The nucleotide order can be fixed by the client via the `X-Nucleotide-Order` request header (e.g. `X-Nucleotide-Order: UCAG`). If omitted, the order is shuffled randomly per request.
-
-The `X-Payload-Checksum` response header carries a CRC32/IEEE checksum (hex) of the full response payload.
+The `X-Payload-Checksum` response header carries a CRC32/IEEE checksum (8-character hex) of the response body.
 
 The server also logs request details to the console.
 
@@ -37,11 +35,11 @@ The container image is published to Docker Hub and GHCR. A systemd unit file and
 │   └── skills/
 │       └── use-modern-go/SKILL.md     # Go version-specific feature guidelines
 ├── .gitignore                         # Go-standard ignores (binaries, test artifacts, coverage)
-├── Dockerfile                         # Multi-stage build: golang:1.24-alpine → alpine:3.21
+├── Dockerfile                         # Multi-stage build: golang:1.26-alpine → alpine:3.21
 ├── LICENSE                            # Apache 2.0
 ├── Makefile                           # Docker build/push automation (GHCR + Docker Hub)
 ├── README.md                          # Project documentation and usage examples
-├── go.mod                             # Module definition (github.com/mlbright/thejoined, go 1.24)
+├── go.mod                             # Module definition (github.com/mlbright/thejoined, go 1.26)
 ├── main.go                            # HTTP server implementation
 ├── main_test.go                       # Test suite
 └── rna.service                        # systemd unit file

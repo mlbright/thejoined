@@ -2,17 +2,17 @@
 
 An HTTP server for network diagnostics and testing.
 
-Send any request to the server and it will respond with a summary of your request (remote address, method, URL, and headers) followed by enough `G`, `U`, `A`, `C` characters to fill the desired payload size. This makes it easy to inspect what your client is actually sending, and to test how your application handles responses of varying sizes.
+Send any request to the server and it will echo your request metadata back as `X-Request-*` response headers and return a body of repeating `G`, `U`, `A`, `C` characters sized to your liking. This makes it easy to inspect what your client is actually sending, and to test how your application handles responses of varying sizes.
 
 ## How it works
 
 1. Client sends any HTTP request, optionally including `X-Payload-Size` to control response size (default: 1 KB).
 2. Server logs the request and responds with:
-   - **Request info section** — remote address, method, URL, and all request headers
-   - **GUAC padding** — repeating `G`, `U`, `A`, `C` characters appended until the total response reaches the requested size
-3. The `X-Payload-Checksum` response header carries a CRC32/IEEE checksum of the full payload.
+   - **`X-Request-*` response headers** — the remote address (`X-Request-Remote-Addr`), method (`X-Request-Method`), URL (`X-Request-Url`), and every incoming request header echoed back as `X-Request-<Header-Name>`
+   - **Body** — pure repeating-pattern padding (by default a randomly shuffled `GUAC`) sized exactly to the requested payload size
+3. The `X-Payload-Checksum` response header carries a CRC32/IEEE checksum (8-character hex) of the response body.
 
-The default payload size is **1 KB**. The minimum payload is always at least the request info section, even if a smaller size is requested.
+The default payload size is **1 KB**. The pattern can be fixed with the `X-Nucleotide-Order` request header (any string up to 8 characters, e.g. `UCAG`); otherwise `GUAC` is shuffled randomly per request.
 
 ## Install
 
@@ -51,9 +51,28 @@ sudo systemctl enable --now rna
 |---------|---------|-------------|
 | `RNA_PORT` | `8080` | Listening port |
 
+### Request headers
+
+| Header | Default | Description |
+|--------|---------|-------------|
+| `X-Payload-Size` | `1KB` | Desired response body size. Accepts `B`, `K`/`KB`, `M`/`MB`, `G`/`GB` suffixes (e.g. `512B`, `64KB`, `5MB`, `1GB`); a bare number is treated as bytes. |
+| `X-Nucleotide-Order` | random `GUAC` | Repeating padding pattern (any string, truncated to 8 characters). |
+
+### Response headers
+
+| Header | Description |
+|--------|-------------|
+| `X-Request-Remote-Addr` | Client remote address as seen by the server. |
+| `X-Request-Method` | HTTP method of the request. |
+| `X-Request-Url` | Request URL. |
+| `X-Request-<Header>` | One entry per incoming request header. |
+| `X-Payload-Checksum` | CRC32/IEEE checksum of the response body, 8-character hex. |
+| `Content-Length` | Response body byte count. |
+| `Content-Type` | `text/plain; charset=utf-8`. |
+
 ## Querying with curl
 
-### Basic request (default 10 MB response)
+### Basic request (default 1 KB response)
 
 ```sh
 curl http://localhost:8080/
@@ -75,30 +94,32 @@ curl -H 'X-Payload-Size: 5MB' http://localhost:8080/
 curl -H 'X-Payload-Size: 1GB' http://localhost:8080/
 ```
 
-### Inspect response headers (including checksum)
+### Fix the padding pattern
 
 ```sh
-curl -s -D - -H 'X-Payload-Size: 256B' http://localhost:8080/
+curl -H 'X-Nucleotide-Order: UCAG' -H 'X-Payload-Size: 32B' http://localhost:8080/
+# UCAGUCAGUCAGUCAGUCAGUCAGUCAGUCAG
+```
+
+### Inspect response headers (including the echoed request and checksum)
+
+```sh
+curl -s -D - -H 'X-Payload-Size: 32B' http://localhost:8080/
 ```
 
 ```
 HTTP/1.1 200 OK
-Content-Length: 256
+Content-Length: 32
 Content-Type: text/plain; charset=utf-8
 X-Payload-Checksum: 4b3a2e1f
+X-Request-Method: GET
+X-Request-Remote-Addr: 127.0.0.1:51234
+X-Request-Url: /
+X-Request-Accept: */*
+X-Request-User-Agent: curl/8.5.0
+X-Request-X-Payload-Size: 32B
 
-Remote-Address: 127.0.0.1:51234
-Method: GET
-URL: /
-X-Payload-Size: 256B
-
-GUACGUACGUAC...
-```
-
-### Show only the request info section
-
-```sh
-curl -s -H 'X-Payload-Size: 256B' http://localhost:8080/ | head -20
+GUACGUACGUACGUACGUACGUACGUACGUAC
 ```
 
 ### Measure download throughput
@@ -114,26 +135,3 @@ curl -s -o /dev/null -D - -H 'X-Payload-Size: 1KB' http://localhost:8080/ \
   | grep -i x-payload-checksum
 # X-Payload-Checksum: a1b2c3d4
 ```
-
-### Send custom headers and verify they are echoed
-
-```sh
-curl -s \
-  -H 'X-Payload-Size: 512B' \
-  -H 'X-My-Header: hello' \
-  http://localhost:8080/ | head -20
-```
-
-### POST with a body
-
-```sh
-curl -s -X POST \
-  -H 'X-Payload-Size: 512B' \
-  -H 'Content-Type: application/json' \
-  -d '{"key":"value"}' \
-  http://localhost:8080/echo
-```
-
-## License
-
-Apache 2.0

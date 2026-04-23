@@ -27,19 +27,17 @@ go vet ./...
 
 **Request flow:**
 1. Any path is accepted via a catch-all handler (`mux.HandleFunc("/", handler)`)
-2. `setRequestHeaders()` copies the remote address, method, URL, and all request headers into the response as `X-Request-*` headers
+2. `setRequestHeaders()` copies the remote address, method, URL, and all incoming request headers onto the response as `X-Request-*` headers (the response body itself contains no request metadata)
 3. `parseSize()` reads the `X-Payload-Size` request header (default 1 KB) to determine total payload size
-4. `nucleotidePattern()` reads the optional `X-Nucleotide-Order` header and returns a validated/shuffled `GUAC` pattern
-5. `writePadding()` streams `G`/`U`/`A`/`C` padding in 32 KB chunks until the total size is reached — this avoids buffering large payloads in memory; the body is pure padding
-6. `computeChecksum()` calculates a CRC32/IEEE checksum of the padding and sets it in the `X-Payload-Checksum` response header before writing the body
-
-The minimum payload is always the request information section, even if a smaller size is requested.
+4. `nucleotidePattern()` reads the optional `X-Nucleotide-Order` header (any pattern, truncated to 8 chars) and returns it, falling back to a randomly shuffled `GUAC`
+5. `writePadding()` streams the repeating pattern in 32 KB chunks until the total size is reached — this avoids buffering large payloads in memory; the body is pure padding sized exactly to `X-Payload-Size`
+6. `computeChecksum()` calculates a CRC32/IEEE checksum of the padding and sets it in the `X-Payload-Checksum` response header (8-character hex) before writing the body
 
 **Configuration** is via the `RNA_PORT` environment variable (default `8080`; set to `80` inside the Docker image).
 
 ## Docker & publishing
 
-The Dockerfile is a two-stage build (`golang:1.24-alpine` → `alpine:3.21`) producing a static binary. Images are tagged with the git-describe version and pushed to both `ghcr.io/mlbright/thejoined` and `mlbright/thejoined` via the Makefile:
+The Dockerfile is a two-stage build (`golang:1.26-alpine` → `alpine:3.21`) producing a static binary. Images are tagged with the git-describe version and pushed to both `ghcr.io/mlbright/thejoined` and `mlbright/thejoined` via the Makefile:
 
 ```bash
 make build    # build and tag
