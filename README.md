@@ -2,7 +2,7 @@
 
 An HTTP server for network diagnostics and testing.
 
-Send any request to the server and it will echo your request metadata back as `X-Request-*` response headers and return a body of repeating `G`, `U`, `A`, `C` characters sized to your liking. This makes it easy to inspect what your client is actually sending, and to test how your application handles responses of varying sizes.
+Send any request to the server and it will echo your request metadata back as `X-Request-*` response headers and return a body of repeating `G`, `U`, `A`, `C` characters sized to your liking. This makes it easy to inspect the conversation between client and server, and to test how your application handles responses of varying sizes.
 
 ## How it works
 
