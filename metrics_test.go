@@ -45,8 +45,10 @@ func TestHistogramMinMax(t *testing.T) {
 func TestMetricsRecordAndSnapshot(t *testing.T) {
 	m := newMetrics([]int64{1024, 4096}, time.Unix(0, 0))
 
-	m.recordSent()
-	m.recordSent()
+	m.reserve()
+	m.beginRequest()
+	m.reserve()
+	m.beginRequest()
 	m.recordResult(1024, 200, 1024, 2*time.Millisecond)
 	m.recordResult(4096, 200, 4096, 3*time.Millisecond)
 	m.recordResult(4096, 500, 4096, 4*time.Millisecond)
@@ -102,7 +104,8 @@ func TestMetricsConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 200 {
 		wg.Go(func() {
-			m.recordSent()
+			m.reserve()
+			m.beginRequest()
 			m.recordResult(1024, 200, 1024, time.Millisecond)
 			m.recordVerifyFailure("checksum", 1024, "x")
 		})

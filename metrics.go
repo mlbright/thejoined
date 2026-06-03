@@ -105,7 +105,16 @@ func newMetrics(sizes []int64, started time.Time) *Metrics {
 	}
 }
 
-func (m *Metrics) recordSent() { m.sent.Add(1); m.inFlight.Add(1) }
+// reserve claims a request slot, returning the 1-based sequence number. Used to
+// enforce the optional request-count limit before the request is actually sent.
+func (m *Metrics) reserve() uint64 { return m.sent.Add(1) }
+
+// unreserve releases a slot claimed by reserve when it exceeds the count limit.
+func (m *Metrics) unreserve() { m.sent.Add(^uint64(0)) }
+
+// beginRequest marks a reserved request as now in flight.
+func (m *Metrics) beginRequest() { m.inFlight.Add(1) }
+
 func (m *Metrics) recordTransportError() {
 	m.transportErrors.Add(1)
 	m.inFlight.Add(-1)

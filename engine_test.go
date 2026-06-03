@@ -21,8 +21,8 @@ func TestRunCountTermination(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalize: %v", err)
 	}
-	run := newRun("test-1", spec, ns, time.Now())
-	run.start(t.Context())
+	run := newRun(t.Context(), "test-1", spec, ns, time.Now())
+	run.start()
 	run.wait()
 
 	if run.State() != StateCompleted {
@@ -68,8 +68,8 @@ func TestRunDurationAndStop(t *testing.T) {
 
 	spec := RunSpec{Target: ts.URL, Workers: 2, Duration: "200ms", PayloadSize: &ParamSpec{Value: "256B"}}
 	ns, _ := spec.normalize()
-	run := newRun("test-2", spec, ns, time.Now())
-	run.start(t.Context())
+	run := newRun(t.Context(), "test-2", spec, ns, time.Now())
+	run.start()
 	run.wait()
 	if run.State() != StateCompleted {
 		t.Errorf("state = %s, want completed", run.State())
@@ -81,12 +81,51 @@ func TestRunDurationAndStop(t *testing.T) {
 	// Now a long run we stop early.
 	spec2 := RunSpec{Target: ts.URL, Workers: 2, Duration: "60s", PayloadSize: &ParamSpec{Value: "256B"}}
 	ns2, _ := spec2.normalize()
-	run2 := newRun("test-3", spec2, ns2, time.Now())
-	run2.start(t.Context())
+	run2 := newRun(t.Context(), "test-3", spec2, ns2, time.Now())
+	run2.start()
 	time.Sleep(150 * time.Millisecond)
 	run2.stop()
 	run2.wait()
 	if run2.State() != StateStopped {
 		t.Errorf("state = %s, want stopped", run2.State())
+	}
+}
+
+func TestRunReservationUndo(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(handler))
+	defer ts.Close()
+	// Far more workers than the request budget forces many workers through the
+	// over-count undo branch; Sent must settle to exactly MaxRequests.
+	spec := RunSpec{Target: ts.URL, Workers: 50, MaxRequests: 5, PayloadSize: &ParamSpec{Value: "64B"}}
+	ns, err := spec.normalize()
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	run := newRun(t.Context(), "undo", spec, ns, time.Now())
+	run.start()
+	run.wait()
+	snap := run.Snapshot()
+	if snap.Completed != 5 {
+		t.Errorf("completed = %d, want 5", snap.Completed)
+	}
+	if snap.Sent != 5 {
+		t.Errorf("sent = %d, want 5 (undo must keep sent from drifting above the limit)", snap.Sent)
+	}
+}
+
+func TestRunStopBeforeStart(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(handler))
+	defer ts.Close()
+	spec := RunSpec{Target: ts.URL, Workers: 4, Duration: "60s", PayloadSize: &ParamSpec{Value: "64B"}}
+	ns, _ := spec.normalize()
+	run := newRun(t.Context(), "early-stop", spec, ns, time.Now())
+	run.stop() // stop before start must not be lost
+	run.start()
+	run.wait()
+	if run.State() != StateStopped {
+		t.Errorf("state = %s, want stopped", run.State())
+	}
+	if run.Snapshot().Completed != 0 {
+		t.Errorf("completed = %d, want 0 (workers should exit immediately)", run.Snapshot().Completed)
 	}
 }

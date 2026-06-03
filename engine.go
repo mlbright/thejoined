@@ -33,12 +33,13 @@ type Run struct {
 
 	state    atomic.Value // RunState
 	stopped  atomic.Bool  // distinguishes stop from natural completion
+	ctx      context.Context
 	cancel   context.CancelFunc
 	done     chan struct{}
 	doneOnce sync.Once
 }
 
-func newRun(id string, spec RunSpec, ns *normalizedSpec, started time.Time) *Run {
+func newRun(parent context.Context, id string, spec RunSpec, ns *normalizedSpec, started time.Time) *Run {
 	r := &Run{
 		ID:      id,
 		Spec:    spec,
@@ -48,6 +49,11 @@ func newRun(id string, spec RunSpec, ns *normalizedSpec, started time.Time) *Run
 		done:    make(chan struct{}),
 	}
 	r.state.Store(StatePending)
+	if ns.duration > 0 {
+		r.ctx, r.cancel = context.WithTimeout(parent, ns.duration)
+	} else {
+		r.ctx, r.cancel = context.WithCancel(parent)
+	}
 	return r
 }
 
@@ -63,9 +69,7 @@ func (r *Run) wait() { <-r.done }
 // stop requests cancellation; the run transitions to stopped when workers exit.
 func (r *Run) stop() {
 	r.stopped.Store(true)
-	if r.cancel != nil {
-		r.cancel()
-	}
+	r.cancel()
 }
 
 // newTransport builds the HTTP transport for a run. Keep-alive is off by default;
@@ -138,29 +142,22 @@ func (r *Run) consume(resp *http.Response, requestedSize int64) (int64, error) {
 
 // start launches the run's workers and a watcher that finalizes state. It
 // returns immediately; callers use wait()/State()/Snapshot() to observe it.
-func (r *Run) start(parent context.Context) {
-	var ctx context.Context
-	if r.ns.duration > 0 {
-		ctx, r.cancel = context.WithTimeout(parent, r.ns.duration)
-	} else {
-		ctx, r.cancel = context.WithCancel(parent)
-	}
+func (r *Run) start() {
 	r.state.Store(StateRunning)
 
 	client := &http.Client{Transport: newTransport(r.ns), Timeout: r.ns.timeout}
 
 	var wg sync.WaitGroup
 	for range r.ns.workers {
-		wg.Go(func() { r.worker(ctx, client) })
+		wg.Go(func() { r.worker(r.ctx, client) })
 	}
 
 	go func() {
 		wg.Wait()
 		client.CloseIdleConnections()
-		switch {
-		case r.stopped.Load():
+		if r.stopped.Load() {
 			r.state.Store(StateStopped)
-		default:
+		} else {
 			r.state.Store(StateCompleted)
 		}
 		r.doneOnce.Do(func() { close(r.done) })
@@ -175,17 +172,16 @@ func (r *Run) worker(ctx context.Context, client *http.Client) {
 			return
 		}
 		// Reserve a request slot under the optional count limit.
-		seq := r.metrics.sent.Add(1)
+		seq := r.metrics.reserve()
 		if r.ns.maxRequests > 0 && int64(seq) > r.ns.maxRequests {
-			r.metrics.sent.Add(^uint64(0)) // undo the over-count reservation
+			r.metrics.unreserve() // undo the over-count reservation
 			return
 		}
-		r.metrics.inFlight.Add(1)
+		r.metrics.beginRequest()
 
 		req, sizeStr, err := r.buildRequest(ctx)
 		if err != nil {
-			r.metrics.transportErrors.Add(1)
-			r.metrics.inFlight.Add(-1)
+			r.metrics.recordTransportError()
 			continue
 		}
 		requestedSize, _ := parseSize(sizeStr)
@@ -193,16 +189,14 @@ func (r *Run) worker(ctx context.Context, client *http.Client) {
 		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
-			r.metrics.transportErrors.Add(1)
-			r.metrics.inFlight.Add(-1)
+			r.metrics.recordTransportError()
 			continue
 		}
 		n, cerr := r.consume(resp, requestedSize)
 		resp.Body.Close()
 		elapsed := time.Since(start)
 		if cerr != nil {
-			r.metrics.transportErrors.Add(1)
-			r.metrics.inFlight.Add(-1)
+			r.metrics.recordTransportError()
 			continue
 		}
 		r.metrics.recordResult(requestedSize, resp.StatusCode, n, elapsed)
