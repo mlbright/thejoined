@@ -59,6 +59,11 @@ func TestRunSpecValidationErrors(t *testing.T) {
 		{"bad duration", RunSpec{Target: "http://x", Workers: 1, Duration: "soon"}},
 		{"bad selection", RunSpec{Target: "http://x", Workers: 1, Duration: "5s", Selection: "spiral"}},
 		{"bad size spec", RunSpec{Target: "http://x", Workers: 1, Duration: "5s", PayloadSize: &ParamSpec{}}},
+		{"non-http scheme", RunSpec{Target: "ftp://host", Workers: 1, Duration: "5s"}},
+		{"no host", RunSpec{Target: "http://", Workers: 1, Duration: "5s"}},
+		{"negative maxRequests", RunSpec{Target: "http://x", Workers: 1, MaxRequests: -5}},
+		{"zero payload size", RunSpec{Target: "http://x", Workers: 1, Duration: "5s", PayloadSize: &ParamSpec{Value: "0"}}},
+		{"negative payload size", RunSpec{Target: "http://x", Workers: 1, Duration: "5s", PayloadSize: &ParamSpec{Value: "-1"}}},
 	}
 	for _, tt := range tests {
 		if _, err := tt.spec.normalize(); err == nil {

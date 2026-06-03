@@ -47,11 +47,21 @@ func (s RunSpec) normalize() (*normalizedSpec, error) {
 	if s.Target == "" {
 		return nil, fmt.Errorf("target is required")
 	}
-	if _, err := url.ParseRequestURI(s.Target); err != nil {
+	u, err := url.ParseRequestURI(s.Target)
+	if err != nil {
 		return nil, fmt.Errorf("invalid target %q: %w", s.Target, err)
 	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("target scheme must be http or https, got %q", u.Scheme)
+	}
+	if u.Host == "" {
+		return nil, fmt.Errorf("target must include a host")
+	}
 	if s.Workers < 1 {
-		return nil, fmt.Errorf("workers must be >= 1")
+		return nil, fmt.Errorf("workers must be >= 1, got %d", s.Workers)
+	}
+	if s.MaxRequests < 0 {
+		return nil, fmt.Errorf("maxRequests must be >= 0, got %d", s.MaxRequests)
 	}
 
 	ns := &normalizedSpec{
@@ -90,7 +100,6 @@ func (s RunSpec) normalize() (*normalizedSpec, error) {
 		return nil, fmt.Errorf("selection must be \"round-robin\" or \"random\", got %q", s.Selection)
 	}
 
-	var err error
 	// Payload size — defaults to the server's 1KB default, expressed in bytes.
 	sizeSpec := s.PayloadSize
 	if sizeSpec == nil {
@@ -103,6 +112,9 @@ func (s RunSpec) normalize() (*normalizedSpec, error) {
 		b, perr := parseSize(v)
 		if perr != nil {
 			return nil, fmt.Errorf("payloadSize value %q: %w", v, perr)
+		}
+		if b <= 0 {
+			return nil, fmt.Errorf("payloadSize value %q must be > 0", v)
 		}
 		ns.sizeBytes = append(ns.sizeBytes, b)
 	}
