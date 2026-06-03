@@ -120,6 +120,10 @@ func (m *Metrics) recordTransportError() {
 	m.inFlight.Add(-1)
 }
 
+// abortInFlight decrements the in-flight count for a request that was begun but
+// is being abandoned due to run-ending context cancellation (not an error).
+func (m *Metrics) abortInFlight() { m.inFlight.Add(-1) }
+
 func (m *Metrics) recordResult(size int64, status int, n int64, d time.Duration) {
 	m.completed.Add(1)
 	m.inFlight.Add(-1)

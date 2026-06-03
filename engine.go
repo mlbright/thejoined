@@ -189,6 +189,10 @@ func (r *Run) worker(ctx context.Context, client *http.Client) {
 		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
+			if ctx.Err() != nil {
+				r.metrics.abortInFlight()
+				return // run ending; cancellation is expected, not a transport error
+			}
 			r.metrics.recordTransportError()
 			continue
 		}
@@ -196,6 +200,10 @@ func (r *Run) worker(ctx context.Context, client *http.Client) {
 		resp.Body.Close()
 		elapsed := time.Since(start)
 		if cerr != nil {
+			if ctx.Err() != nil {
+				r.metrics.abortInFlight()
+				return // run ending; cancellation is expected, not a transport error
+			}
 			r.metrics.recordTransportError()
 			continue
 		}

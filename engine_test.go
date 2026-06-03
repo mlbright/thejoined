@@ -91,6 +91,26 @@ func TestRunDurationAndStop(t *testing.T) {
 	}
 }
 
+func TestRunDurationNoPhantomErrors(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(handler))
+	defer ts.Close()
+	spec := RunSpec{Target: ts.URL, Workers: 8, Duration: "300ms", PayloadSize: &ParamSpec{Value: "256B"}}
+	ns, err := spec.normalize()
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	run := newRun(t.Context(), "no-phantom", spec, ns, time.Now())
+	run.start()
+	run.wait()
+	snap := run.Snapshot()
+	if snap.TransportErrors != 0 {
+		t.Errorf("transportErrors = %d, want 0 (duration cancellation must not count as error)", snap.TransportErrors)
+	}
+	if snap.Completed == 0 {
+		t.Error("expected some completed requests")
+	}
+}
+
 func TestRunReservationUndo(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(handler))
 	defer ts.Close()

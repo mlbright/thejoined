@@ -39,6 +39,7 @@ func clientMux(m *Manager) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB cap on a RunSpec
 		var spec RunSpec
 		if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
@@ -71,12 +72,16 @@ func clientMux(m *Manager) http.Handler {
 	})
 
 	mux.HandleFunc("POST /runs/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
-		if !m.Stop(r.PathValue("id")) {
+		id := r.PathValue("id")
+		if !m.Stop(id) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such run"})
 			return
 		}
-		run, _ := m.Get(r.PathValue("id"))
-		writeJSON(w, http.StatusOK, viewOf(run))
+		if run, ok := m.Get(id); ok {
+			writeJSON(w, http.StatusOK, viewOf(run))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": string(StateStopped)})
 	})
 
 	return mux
@@ -88,5 +93,10 @@ const maxKeptRuns = 100
 func runClient(port string) error {
 	m := newManager(context.Background(), maxKeptRuns)
 	log.Printf("client mode listening on :%s (control API)", port)
-	return http.ListenAndServe(":"+port, clientMux(m))
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           clientMux(m),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	return srv.ListenAndServe()
 }
