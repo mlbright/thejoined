@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -90,6 +91,35 @@ func TestMetricsRecordAndSnapshot(t *testing.T) {
 	}
 	if b4k.BytesPerSec <= 0 {
 		t.Errorf("4096 BytesPerSec = %v, want > 0", b4k.BytesPerSec)
+	}
+	if snap.InFlight != -2 {
+		t.Errorf("InFlight = %d, want -2", snap.InFlight)
+	}
+}
+
+func TestMetricsConcurrent(t *testing.T) {
+	m := newMetrics([]int64{1024}, time.Unix(0, 0))
+	var wg sync.WaitGroup
+	for range 200 {
+		wg.Go(func() {
+			m.recordSent()
+			m.recordResult(1024, 200, 1024, time.Millisecond)
+			m.recordVerifyFailure("checksum", 1024, "x")
+		})
+	}
+	wg.Wait()
+	snap := m.snapshot(time.Unix(0, 0).Add(time.Second))
+	if snap.Sent != 200 {
+		t.Errorf("Sent = %d, want 200", snap.Sent)
+	}
+	if snap.Completed != 200 {
+		t.Errorf("Completed = %d, want 200", snap.Completed)
+	}
+	if snap.InFlight != 0 {
+		t.Errorf("InFlight = %d, want 0", snap.InFlight)
+	}
+	if len(snap.BySize) != 1 || snap.BySize[0].Requests != 200 {
+		t.Errorf("bucket requests wrong: %+v", snap.BySize)
 	}
 }
 

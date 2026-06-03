@@ -24,7 +24,7 @@ func (h *histogram) record(d time.Duration) {
 	if d < 0 {
 		n = 0
 	}
-	idx := bits.Len64(n) // 0 for n==0, else 1..64
+	idx := bits.Len64(n) // 0 for n==0, else 1..63
 	h.buckets[idx]++
 	if h.count == 0 || n < h.min {
 		h.min = n
