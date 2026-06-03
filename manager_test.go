@@ -67,3 +67,36 @@ func TestManagerStopUnknown(t *testing.T) {
 		t.Error("Stop on unknown id should return false")
 	}
 }
+
+func TestManagerRunningNotEvicted(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(handler))
+	defer ts.Close()
+	m := newManager(t.Context(), 2)
+
+	// A long-running run that will not finish on its own during the test.
+	long, err := m.Start(RunSpec{Target: ts.URL, Workers: 1, Duration: "60s", PayloadSize: &ParamSpec{Value: "64B"}})
+	if err != nil {
+		t.Fatalf("Start long: %v", err)
+	}
+
+	// Start several short runs that finish; with maxKept=2 these must evict
+	// each other (FIFO of finished) but must NOT evict the still-running run.
+	for range 4 {
+		short, err := m.Start(RunSpec{Target: ts.URL, Workers: 1, MaxRequests: 2, PayloadSize: &ParamSpec{Value: "64B"}})
+		if err != nil {
+			t.Fatalf("Start short: %v", err)
+		}
+		short.wait()
+	}
+
+	if _, ok := m.Get(long.ID); !ok {
+		t.Error("running run must never be evicted")
+	}
+	if long.State() != StateRunning {
+		t.Errorf("long run state = %s, want running", long.State())
+	}
+
+	// Clean up: stop the long run and wait for it to exit.
+	m.Stop(long.ID)
+	long.wait()
+}
