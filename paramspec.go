@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +49,7 @@ func expandRange(r Range) ([]int64, error) {
 		if err != nil || factor < 2 {
 			return nil, fmt.Errorf("geometric step %q must be xN with N>=2", r.Step)
 		}
-		for v := from; v <= to; v *= factor {
+		for v := from; v > 0 && v <= to; v *= factor {
 			out = append(out, v)
 			if len(out) > maxRangeValues {
 				return nil, fmt.Errorf("range expands to more than %d values", maxRangeValues)
@@ -124,7 +125,7 @@ func specValues(spec *ParamSpec) ([]string, error) {
 	case spec.Value != "":
 		return []string{spec.Value}, nil
 	case len(spec.Set) > 0:
-		return slicesClone(spec.Set), nil
+		return slices.Clone(spec.Set), nil
 	default:
 		bytes, err := expandRange(*spec.Range)
 		if err != nil {
@@ -136,12 +137,6 @@ func specValues(spec *ParamSpec) ([]string, error) {
 		}
 		return out, nil
 	}
-}
-
-func slicesClone(s []string) []string {
-	out := make([]string, len(s))
-	copy(out, s)
-	return out
 }
 
 // newSelector builds a Selector for a spec. When random is true, seed seeds a
