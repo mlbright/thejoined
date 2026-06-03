@@ -153,6 +153,7 @@ func (r *Run) start() {
 	}
 
 	go func() {
+		defer r.cancel()
 		wg.Wait()
 		client.CloseIdleConnections()
 		if r.stopped.Load() {
