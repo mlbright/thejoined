@@ -44,6 +44,22 @@ func TestRunCountTermination(t *testing.T) {
 	if snap.InFlight != 0 {
 		t.Errorf("inFlight = %d, want 0 after completion", snap.InFlight)
 	}
+
+	// Per-size buckets must actually populate (regression: suffixed sizes
+	// like "256B" must be parsed with parseSize, not strconv.ParseInt).
+	var totalBySize uint64
+	for _, b := range snap.BySize {
+		totalBySize += b.Requests
+	}
+	if totalBySize != 50 {
+		t.Errorf("sum of per-size requests = %d, want 50", totalBySize)
+	}
+	if snap.VerifyFailures["size"] != 0 {
+		t.Errorf("size verify failures = %d, want 0", snap.VerifyFailures["size"])
+	}
+	if snap.VerifyFailures["length"] != 0 {
+		t.Errorf("length verify failures = %d, want 0", snap.VerifyFailures["length"])
+	}
 }
 
 func TestRunDurationAndStop(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"hash/crc32"
 	"io"
 	"net/http"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -189,7 +188,7 @@ func (r *Run) worker(ctx context.Context, client *http.Client) {
 			r.metrics.inFlight.Add(-1)
 			continue
 		}
-		requestedSize, _ := strconv.ParseInt(sizeStr, 10, 64)
+		requestedSize, _ := parseSize(sizeStr)
 
 		start := time.Now()
 		resp, err := client.Do(req)
