@@ -33,6 +33,15 @@ go vet ./...
 5. `writePadding()` streams the repeating pattern in 32 KB chunks until the total size is reached — this avoids buffering large payloads in memory; the body is pure padding sized exactly to `X-Payload-Size`
 6. `computeChecksum()` calculates a CRC32/IEEE checksum of the padding and sets it in the `X-Payload-Checksum` response header (8-character hex) before writing the body
 
+### Modes
+
+The binary runs in one of two modes, fixed at startup by `RNA_MODE` (default `server`):
+
+- **Server** (`server.go`) — the diagnostic server described above (`runServer`).
+- **Client** (`clientapi.go`, `manager.go`, `engine.go`, `runspec.go`, `paramspec.go`, `metrics.go`) — a closed-loop load generator exposing a REST API (`runClient`). A `Manager` holds in-memory `Run`s; each `Run` drives N worker goroutines that build requests via per-parameter `Selector`s (round-robin default), verify responses against `X-Payload-Checksum`, and record per-payload-size metrics.
+
+See `CONTEXT.md` for the domain vocabulary and `docs/adr/0001..0003` for the mode/load decisions.
+
 **Configuration** is via the `RNA_PORT` environment variable (default `8080`; set to `80` inside the Docker image).
 
 ## Docker & publishing
