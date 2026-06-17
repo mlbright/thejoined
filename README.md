@@ -49,7 +49,8 @@ sudo systemctl enable --now rna
 
 | Env var | Default | Description |
 |---------|---------|-------------|
-| `RNA_PORT` | `8080` | Listening port |
+| `RNA_MODE` | `server` | `server` (diagnostic server) or `client` (load generator). |
+| `RNA_PORT` | `8080` | Listening port — the server port, or the client control-API port. |
 
 ### Request headers
 
@@ -135,3 +136,57 @@ curl -s -o /dev/null -D - -H 'X-Payload-Size: 1KB' http://localhost:8080/ \
   | grep -i x-payload-checksum
 # X-Payload-Checksum: a1b2c3d4
 ```
+
+## Client mode (load generator)
+
+Run the same binary as a closed-loop load generator with `RNA_MODE=client`. It exposes a REST control API (on `RNA_PORT`) for starting runs that drive traffic at an RNA server, modulating the server's parameters per request.
+
+```sh
+RNA_MODE=client RNA_PORT=9090 ./rna
+```
+
+### Start a run
+
+`POST /runs` with a JSON body:
+
+```sh
+curl -X POST http://localhost:9090/runs -d '{
+  "target": "http://server:8080",
+  "workers": 8,
+  "duration": "30s",
+  "payloadSize": { "range": { "from": "1KB", "to": "1GB", "step": "x2" } },
+  "nucleotideOrder": { "set": ["GUAC", "UCAG"] },
+  "method": { "value": "GET" },
+  "path": { "value": "/" }
+}'
+```
+
+Returns `201` with `{ "id": "...", "state": "running", ... }`.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `target` | — (required) | Server base URL (http/https, must include host). |
+| `workers` | — (required) | Concurrent closed-loop workers. |
+| `duration` | — | Go duration (e.g. `30s`). Run ends when it elapses. |
+| `maxRequests` | — | Total request cap across all workers. |
+| `payloadSize` / `nucleotideOrder` / `method` / `path` | size `1KB`, order random, method `GET`, path `/` | Parameter specs (see below). |
+| `headers` | none | Fixed extra headers attached to every request. |
+| `selection` | `round-robin` | `round-robin` or `random`. |
+| `seed` | `0` | Seed for `random` selection. |
+| `keepAlive` | `false` | Reuse connections (fresh connection per request when false). |
+| `timeoutMs` | `5000` | Per-request timeout. |
+| `verify` | `true` | Verify size / Content-Length / `X-Payload-Checksum` per response. |
+
+At least one of `duration` or `maxRequests` is required.
+
+A **parameter spec** sets exactly one of: `{"value":"1KB"}` (fixed), `{"set":["1KB","1MB"]}` (round-robined), or `{"range":{"from":"1KB","to":"1GB","step":"x2"}}` (payload size only; `step` is `xN` geometric or `+SIZE` arithmetic).
+
+### Inspect, list, and stop
+
+```sh
+curl http://localhost:9090/runs/<id>       # status + live/final metrics (bucketed by payload size)
+curl http://localhost:9090/runs            # list runs
+curl -X POST http://localhost:9090/runs/<id>/stop   # stop a running run
+```
+
+Metrics are reported per payload size: request count, bytes, bytes/sec, status distribution, and latency percentiles (p50/p90/p99). Runs are kept in memory only.
