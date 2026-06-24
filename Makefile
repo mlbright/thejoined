@@ -2,7 +2,9 @@ GHCR_IMAGE      := ghcr.io/cpacketnetworks/thejoined
 DOCKERHUB_IMAGE := cpacketnetworks/thejoined
 TAG             := $(shell git describe --tags --always --dirty)
 
-.PHONY: build push publish login-dockerhub
+ARM64_BINARY := rna-linux-arm64
+
+.PHONY: build build-arm64 push publish login-dockerhub
 
 build:
 	docker build \
@@ -11,6 +13,10 @@ build:
 		-t $(DOCKERHUB_IMAGE):$(TAG) \
 		-t $(DOCKERHUB_IMAGE):latest \
 		.
+
+build-arm64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+		go build -trimpath -ldflags="-s -w" -o $(ARM64_BINARY) .
 
 push:
 	docker push $(GHCR_IMAGE):$(TAG)
