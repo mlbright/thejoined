@@ -8,7 +8,11 @@ An HTTP diagnostic server (and closed-loop load-generator client) named `rna`, d
 
 **Publish**:
 Building the container image and pushing it to a registry in one motion.
-_Avoid_: deploy, release, ship
+_Avoid_: deploy, ship
+
+**Release**:
+Attaching the per-architecture binaries to a GitHub Release anchored at a version tag.
+_Avoid_: publish (reserved for images), upload
 
 **Mirror**:
 One of the peer repositories (cPacketNetworks and mlbright) holding the same code and history.

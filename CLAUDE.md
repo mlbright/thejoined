@@ -57,6 +57,18 @@ make publish-ghcr  # multi-arch (amd64+arm64) build + push to GHCR only;
 
 CI (`.github/workflows/publish-ghcr.yml`) runs vet + tests, then `make publish-ghcr` on every push to `main` (and on manual dispatch). The GHCR namespace is derived from the repository owner, so the same workflow publishes `ghcr.io/cpacketnetworks/thejoined` from the cPacketNetworks mirror and `ghcr.io/mlbright/thejoined` from the mlbright mirror using only `GITHUB_TOKEN` — see `docs/adr/0001-owner-derived-ghcr-publishing.md`.
 
+## Releases
+
+A **Release** (see `CONTEXT.md`) attaches the static Linux binaries (`rna-linux-amd64`, `rna-linux-arm64`) plus a `SHA256SUMS` file to a GitHub Release. Tagging is a deliberate manual act; the Makefile only validates and packages:
+
+```bash
+git tag v0.1.0
+git push cpacket v0.1.0
+make release          # requires clean tree + HEAD exactly on a pushed tag;
+                      # RELEASE_REPO=<owner>/<repo> overrides the
+                      # cPacketNetworks/thejoined default
+```
+
 ## Go version
 
 This project targets **Go 1.26**. Use the idioms documented in `.github/skills/use-modern-go/SKILL.md`, notably:

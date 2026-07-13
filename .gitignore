@@ -9,7 +9,8 @@
 *.dylib
 thejoined
 rna
-rna-linux-arm64
+rna-linux-*
+SHA256SUMS
 
 # Test binary, built with `go test -c`
 *.test

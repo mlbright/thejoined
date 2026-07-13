@@ -28,6 +28,17 @@ Multi-arch (amd64/arm64) images are also published to GHCR on every push to `mai
 docker run -p 8080:8080 ghcr.io/cpacketnetworks/thejoined
 ```
 
+### Download a release binary
+
+Static Linux binaries (amd64, arm64) are attached to [GitHub Releases](https://github.com/cPacketNetworks/thejoined/releases):
+
+```sh
+curl -LO https://github.com/cPacketNetworks/thejoined/releases/latest/download/rna-linux-amd64
+curl -LO https://github.com/cPacketNetworks/thejoined/releases/latest/download/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+chmod +x rna-linux-amd64
+```
+
 ### Build from source
 
 Requires Go 1.26 or later.

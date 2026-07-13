@@ -4,8 +4,10 @@ DOCKERHUB_IMAGE := cpacketnetworks/thejoined
 TAG             := $(shell git describe --tags --always --dirty)
 
 ARM64_BINARY := rna-linux-arm64
+AMD64_BINARY := rna-linux-amd64
+RELEASE_REPO ?= cPacketNetworks/thejoined
 
-.PHONY: build build-arm64 push publish publish-ghcr login-dockerhub
+.PHONY: build build-arm64 build-amd64 push publish publish-ghcr release login-dockerhub
 
 build:
 	docker build \
@@ -18,6 +20,10 @@ build:
 build-arm64:
 	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
 		go build -trimpath -ldflags="-s -w" -o $(ARM64_BINARY) .
+
+build-amd64:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+		go build -trimpath -ldflags="-s -w" -o $(AMD64_BINARY) .
 
 push:
 	docker push $(GHCR_IMAGE):$(TAG)
@@ -37,6 +43,17 @@ publish-ghcr:
 		-t $(GHCR_IMAGE):latest \
 		--push \
 		.
+
+# Attach the per-arch binaries to a GitHub Release for the current tag.
+# HEAD must be clean and exactly on a tag already pushed to $(RELEASE_REPO):
+# --verify-tag aborts on an unpushed tag, so the release can never silently
+# anchor to the default-branch tip instead of the tagged commit.
+release: build-amd64 build-arm64
+	@test -z "$$(git status --porcelain)" || { echo "release: working tree is dirty" >&2; exit 1; }
+	@git describe --tags --exact-match >/dev/null 2>&1 || { echo "release: HEAD is not exactly on a tag" >&2; exit 1; }
+	sha256sum $(AMD64_BINARY) $(ARM64_BINARY) > SHA256SUMS
+	gh release create $(TAG) --verify-tag -R $(RELEASE_REPO) --generate-notes \
+		$(AMD64_BINARY) $(ARM64_BINARY) SHA256SUMS
 
 login-dockerhub:
 	docker login -u mbrightcpacket
