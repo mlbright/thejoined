@@ -40,18 +40,22 @@ The binary runs in one of two modes, fixed at startup by `RNA_MODE` (default `se
 - **Server** (`server.go`) — the diagnostic server described above (`runServer`).
 - **Client** (`clientapi.go`, `manager.go`, `engine.go`, `runspec.go`, `paramspec.go`, `metrics.go`) — a closed-loop load generator exposing a REST API (`runClient`). A `Manager` holds in-memory `Run`s; each `Run` drives N worker goroutines that build requests via per-parameter `Selector`s (round-robin default), verify responses against `X-Payload-Checksum`, and record per-payload-size metrics.
 
-See `CONTEXT.md` for the domain vocabulary and `docs/adr/0001..0003` for the mode/load decisions.
+See `CONTEXT.md` for the domain vocabulary and `docs/adr/` for recorded decisions.
 
 **Configuration** is via the `RNA_PORT` environment variable (default `8080`; set to `80` inside the Docker image).
 
 ## Docker & publishing
 
-The Dockerfile is a two-stage build (`golang:1.26-alpine` → `alpine:3.21`) producing a static binary. Images are tagged with the git-describe version and pushed to both `ghcr.io/cpacketnetworks/thejoined` and `cpacketnetworks/thejoined` via the Makefile:
+The Dockerfile is a two-stage build (`golang:1.26-alpine` → `alpine:3.21`) producing a static binary. The builder stage is pinned to `$BUILDPLATFORM` and cross-compiles to `$TARGETARCH`, and the runtime stage is deliberately RUN-free, so multi-arch builds never use QEMU emulation. Images are tagged with the git-describe version plus `latest`:
 
 ```bash
-make build    # build and tag
-make publish  # build + push to GHCR and Docker Hub
+make build         # single-arch build, tagged for GHCR + Docker Hub
+make publish       # build + push to GHCR and Docker Hub (manual flow)
+make publish-ghcr  # multi-arch (amd64+arm64) build + push to GHCR only;
+                   # GHCR_OWNER=<owner> overrides the cpacketnetworks default
 ```
+
+CI (`.github/workflows/publish-ghcr.yml`) runs vet + tests, then `make publish-ghcr` on every push to `main` (and on manual dispatch). The GHCR namespace is derived from the repository owner, so the same workflow publishes `ghcr.io/cpacketnetworks/thejoined` from the cPacketNetworks mirror and `ghcr.io/mlbright/thejoined` from the mlbright mirror using only `GITHUB_TOKEN` — see `docs/adr/0001-owner-derived-ghcr-publishing.md`.
 
 ## Go version
 

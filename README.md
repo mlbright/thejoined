@@ -22,6 +22,12 @@ The default payload size is **1 KB**. The pattern can be fixed with the `X-Nucle
 docker run -p 8080:8080 cpacketnetworks/thejoined
 ```
 
+Multi-arch (amd64/arm64) images are also published to GHCR on every push to `main`:
+
+```sh
+docker run -p 8080:8080 ghcr.io/cpacketnetworks/thejoined
+```
+
 ### Build from source
 
 Requires Go 1.26 or later.
