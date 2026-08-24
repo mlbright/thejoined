@@ -10,6 +10,7 @@ RELEASE_REPO ?= cPacketNetworks/thejoined
 
 build:
 	docker build \
+		--build-arg SOURCE_REPO=$(GHCR_OWNER)/thejoined \
 		-t $(GHCR_IMAGE):$(TAG) \
 		-t $(GHCR_IMAGE):latest \
 		.
@@ -34,6 +35,7 @@ publish: build push
 publish-ghcr:
 	docker buildx build \
 		--platform linux/amd64,linux/arm64 \
+		--build-arg SOURCE_REPO=$(GHCR_OWNER)/thejoined \
 		-t $(GHCR_IMAGE):$(TAG) \
 		-t $(GHCR_IMAGE):latest \
 		--push \

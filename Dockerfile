@@ -17,6 +17,13 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # drag QEMU emulation back into foreign-arch builds, so the CA bundle is
 # copied from the builder instead of installed with apk.
 FROM alpine:3.21
+# org.opencontainers.image.source is what links the GHCR package to a repo
+# (and lets the repo's GITHUB_TOKEN publish it). Parameterized because the
+# cPacketNetworks and mlbright mirrors each publish to their own namespace.
+ARG SOURCE_REPO=cPacketNetworks/thejoined
+LABEL org.opencontainers.image.source="https://github.com/${SOURCE_REPO}" \
+      org.opencontainers.image.description="RNA diagnostic HTTP server and closed-loop load generator" \
+      org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 WORKDIR /app
 COPY --from=builder /build/rna .
