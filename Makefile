@@ -1,6 +1,5 @@
 GHCR_OWNER      ?= cpacketnetworks
 GHCR_IMAGE      := ghcr.io/$(GHCR_OWNER)/thejoined
-DOCKERHUB_IMAGE := cpacketnetworks/thejoined
 TAG             := $(shell git describe --tags --always --dirty)
 
 ARM64_BINARY := rna-linux-arm64
@@ -13,8 +12,6 @@ build:
 	docker build \
 		-t $(GHCR_IMAGE):$(TAG) \
 		-t $(GHCR_IMAGE):latest \
-		-t $(DOCKERHUB_IMAGE):$(TAG) \
-		-t $(DOCKERHUB_IMAGE):latest \
 		.
 
 build-arm64:
@@ -28,8 +25,6 @@ build-amd64:
 push:
 	docker push $(GHCR_IMAGE):$(TAG)
 	docker push $(GHCR_IMAGE):latest
-	docker push $(DOCKERHUB_IMAGE):$(TAG)
-	docker push $(DOCKERHUB_IMAGE):latest
 
 publish: build push
 
