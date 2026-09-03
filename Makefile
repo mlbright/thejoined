@@ -6,7 +6,7 @@ ARM64_BINARY := rna-linux-arm64
 AMD64_BINARY := rna-linux-amd64
 RELEASE_REPO ?= cPacketNetworks/thejoined
 
-.PHONY: build build-arm64 build-amd64 push publish publish-ghcr release login-dockerhub
+.PHONY: build build-arm64 build-amd64 push publish publish-ghcr release login-dockerhub update-actions check-actions
 
 build:
 	docker build \
@@ -54,3 +54,12 @@ release: build-amd64 build-arm64
 
 login-dockerhub:
 	docker login -u mbrightcpacket
+
+# Pin every GitHub Action in .github/ to the commit of its latest stable
+# release; the script header explains the SHA-pinning rationale.
+# check-actions only reports, exiting non-zero when a pin is stale.
+update-actions:
+	scripts/update-actions.sh
+
+check-actions:
+	scripts/update-actions.sh --check

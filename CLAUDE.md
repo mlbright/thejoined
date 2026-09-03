@@ -57,6 +57,14 @@ make publish-ghcr  # multi-arch (amd64+arm64) build + push to GHCR only;
 
 CI (`.github/workflows/publish-ghcr.yml`) runs vet + tests, then `make publish-ghcr` on every push to `main` (and on manual dispatch). The GHCR namespace is derived from the repository owner, so the same workflow publishes `ghcr.io/cpacketnetworks/thejoined` from the cPacketNetworks mirror and `ghcr.io/mlbright/thejoined` from the mlbright mirror using only `GITHUB_TOKEN` — see `docs/adr/0001-owner-derived-ghcr-publishing.md`.
 
+Third-party actions in the workflow are pinned to the full commit SHA of their latest stable release, with the version in a trailing comment (`uses: actions/checkout@<sha> # v7.0.1`). Do not hand-edit those pins; refresh them with:
+
+```bash
+make update-actions   # rewrite every `uses:` to the latest stable release (needs gh auth)
+make check-actions    # report stale pins, exit 1 if any
+scripts/update-actions.sh --pin tag   # use @v7.0.1-style tags instead of SHAs
+```
+
 ## Releases
 
 A **Release** (see `CONTEXT.md`) attaches the static Linux binaries (`rna-linux-amd64`, `rna-linux-arm64`) plus a `SHA256SUMS` file to a GitHub Release. Tagging is a deliberate manual act; the Makefile only validates and packages:
